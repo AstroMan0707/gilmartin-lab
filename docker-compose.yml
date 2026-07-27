@@ -1,0 +1,27 @@
+services:
+  tunl-parser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tunl-parser:latest
+    container_name: tunl-parser
+    # 8477 both inside and outside the container, so there is one port number to reason about
+    # when reading logs or the healthcheck. PORT overrides only the published side, for when
+    # 8477 is also taken: PORT=9000 ./scripts/docker-run.sh
+    ports:
+      - "${PORT:-8477}:8477"
+    restart: unless-stopped
+    # No volumes and no environment: the app is static and holds data only in the visitor's
+    # browser, so there is nothing to persist and nothing to configure.
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

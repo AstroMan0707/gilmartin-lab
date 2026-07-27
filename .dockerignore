@@ -1,0 +1,24 @@
+# Keep the build context small: node_modules alone is hundreds of megabytes and is
+# reinstalled inside the image anyway.
+**/node_modules
+**/dist
+**/.vite
+**/*.tsbuildinfo
+
+.venv
+__pycache__
+*.pyc
+.python-version
+uv.lock
+pyproject.toml
+main.py
+
+.git
+.gitignore
+.github
+
+# The example data is for local testing, not for the image.
+tunl-parser/
+
+scripts/
+*.md

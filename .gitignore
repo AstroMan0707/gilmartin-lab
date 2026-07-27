@@ -1,0 +1,11 @@
+# Python virtualenv left over from the original prototype; the app does not use it.
+.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+
+# End-to-end run output
+app/e2e/artifacts/
