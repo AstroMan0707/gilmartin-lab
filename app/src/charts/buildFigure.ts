@@ -1,9 +1,9 @@
 import {
   aggregate,
   collapseToUnit,
+  combineFor,
   effectiveUnit,
   groupBy,
-  isPercentScaled,
   type LevelOrder,
 } from '../analysis/aggregate'
 import { applyBins, binLabelOrder, computeBins } from '../analysis/binning'
@@ -11,7 +11,7 @@ import type { AnalysisRow } from '../analysis/rows'
 import type { Registry, VariableDef } from '../variables/registry'
 import { axisTitle } from '../variables/registry'
 import type { ChartSpec } from './spec'
-import { resolveLabels } from './spec'
+import { measuresLabel, resolveLabels } from './spec'
 import {
   assignSeriesColours,
   axisStyle,
@@ -101,11 +101,9 @@ function errorBar(values: (number | null)[], theme: ChartTheme) {
   }
 }
 
-/** Y-axis label for a measure, accounting for binary-to-percentage scaling. */
+/** Y-axis label for a measure, including its unit. */
 function measureLabel(def: VariableDef | undefined): string {
-  if (!def) return ''
-  if (isPercentScaled(def)) return `${def.label} (%)`
-  return axisTitle(def)
+  return def ? axisTitle(def) : ''
 }
 
 /**
@@ -196,7 +194,6 @@ function buildHistogram(
 ): Figure {
   const measureKey = spec.measureKeys[0]
   const def = registry.byKey.get(measureKey)
-  const scale = isPercentScaled(def) ? 100 : 1
   const labels = resolveLabels(spec, registry, measureLabel(def))
 
   const groupingKeys = spec.xKey ? [spec.xKey] : []
@@ -208,9 +205,12 @@ function buildHistogram(
   const csvRows: (string | number | null)[][] = []
 
   groups.forEach((group) => {
-    const values = collapseToUnit(group.rows, measureKey, spec.unit)
-      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
-      .map((v) => v * scale)
+    const values = collapseToUnit(
+      group.rows,
+      measureKey,
+      spec.unit,
+      combineFor(def),
+    ).filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
 
     data.push({
       type: 'histogram',
@@ -362,7 +362,7 @@ function buildBarOrBox(
   const labels = resolveLabels(
     spec,
     registry,
-    multiPanel ? '' : measureLabel(registry.byKey.get(panels[0])),
+    multiPanel ? measuresLabel(spec, registry) : measureLabel(registry.byKey.get(panels[0])),
   )
   const layout = panelLayout(panels, spec, registry, theme, labels, xLevels)
   if (kind === 'box') layout.boxmode = spec.seriesKey ? 'group' : 'overlay'
@@ -457,7 +457,7 @@ function buildLine(
   const labels = resolveLabels(
     spec,
     registry,
-    multiPanel ? '' : measureLabel(registry.byKey.get(panels[0])),
+    multiPanel ? measuresLabel(spec, registry) : measureLabel(registry.byKey.get(panels[0])),
   )
   const layout = panelLayout(panels, spec, registry, theme, labels, xLevels)
 

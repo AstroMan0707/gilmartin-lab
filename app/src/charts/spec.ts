@@ -159,6 +159,21 @@ export function unavailableReason(
   }
 }
 
+/**
+ * Names the measures for a figure title.
+ *
+ * With several panels there is no single y-axis to name, so the title lists them instead —
+ * otherwise a three-panel figure is titled just "by Genotype", which says nothing about what is
+ * plotted. Beyond three the list is replaced by a count, to keep the title readable.
+ */
+export function measuresLabel(spec: ChartSpec, registry: Registry): string {
+  const labels = spec.measureKeys.map((k) => registry.byKey.get(k)?.label ?? k)
+  if (labels.length === 0) return ''
+  if (labels.length === 1) return labels[0]
+  if (labels.length <= 3) return labels.join(', ')
+  return `${labels.length} measures`
+}
+
 /** Fills in axis titles and a title from the selection, unless the user overrode them. */
 export function resolveLabels(
   spec: ChartSpec,

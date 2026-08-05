@@ -4,6 +4,12 @@ import { defaultSpec, type ChartSpec } from '../charts/spec'
 import type { ThemeMode } from '../charts/theme'
 import { defaultExportOptions, type FigureExportOptions } from '../export/figureOptions'
 import { loadFiles, type LoadInput, type LoadProgress } from '../loadFiles'
+import {
+  deletePreset as removePreset,
+  listPresets,
+  savePreset as writePreset,
+  type AnalysisPreset,
+} from '../presets'
 import type { Dataset } from '../types'
 import { buildRegistry, type Registry } from '../variables/registry'
 
@@ -32,6 +38,14 @@ interface AppState {
   spec: ChartSpec
   exportOptions: FigureExportOptions
 
+  // --- Saved analyses ------------------------------------------------------------------
+  presets: AnalysisPreset[]
+  /**
+   * A preset opened from a shared link before any data was loaded. Held so it can be applied
+   * once files arrive, instead of being discarded by the fresh-load reset.
+   */
+  pendingPreset: AnalysisPreset | null
+
   // --- Actions -------------------------------------------------------------------------
   load(input: LoadInput): Promise<void>
   clear(): void
@@ -41,6 +55,11 @@ interface AppState {
   updateSpec(patch: Partial<ChartSpec>): void
   resetSpec(): void
   updateExportOptions(patch: Partial<FigureExportOptions>): void
+  saveCurrentAsPreset(name: string): void
+  applyPreset(preset: AnalysisPreset): void
+  removePreset(id: string): void
+  /** Queues a shared preset to be applied when data is loaded. */
+  setPendingPreset(preset: AnalysisPreset | null): void
   /** Rows at trial level, honouring the correction-trial setting. */
   trialRows(): AnalysisRow[]
   /** Rows at session level, honouring the correction-trial setting. */
@@ -70,19 +89,27 @@ export const useAppStore = create<AppState>((set, get) => ({
   theme: 'light',
   spec: defaultSpec(),
   exportOptions: defaultExportOptions(),
+  presets: listPresets(),
+  pendingPreset: null,
 
   async load(input) {
     set({ loading: true, loadError: null, progress: null })
     try {
       const dataset = await loadFiles(input, (progress) => set({ progress }))
       rowCache = null
+      const pending = get().pendingPreset
       set({
         dataset,
         registry: buildRegistry(dataset),
         loading: false,
         progress: null,
-        // A fresh load invalidates any previous selection, since the variables may differ.
-        spec: defaultSpec(),
+        // A fresh load invalidates any previous selection, since the variables may differ —
+        // unless a shared preset is waiting, which is the whole point of opening such a link.
+        spec: pending ? pending.spec : defaultSpec(),
+        includeCorrectionTrials: pending
+          ? pending.includeCorrectionTrials
+          : get().includeCorrectionTrials,
+        pendingPreset: null,
         tab: 'playground',
       })
     } catch (error) {
@@ -124,6 +151,28 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateExportOptions(patch) {
     set({ exportOptions: { ...get().exportOptions, ...patch } })
+  },
+
+  saveCurrentAsPreset(name) {
+    const { spec, includeCorrectionTrials } = get()
+    set({ presets: writePreset(name, spec, includeCorrectionTrials) })
+  },
+
+  applyPreset(preset) {
+    rowCache = null
+    set({
+      spec: preset.spec,
+      includeCorrectionTrials: preset.includeCorrectionTrials,
+      tab: 'playground',
+    })
+  },
+
+  removePreset(id) {
+    set({ presets: removePreset(id) })
+  },
+
+  setPendingPreset(preset) {
+    set({ pendingPreset: preset })
   },
 
   trialRows() {

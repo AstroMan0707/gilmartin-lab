@@ -73,14 +73,18 @@ export function buildTrialRows(
       values.isCorrectionTrial = trial.isCorrectionTrial ? 1 : 0
 
       /*
-       * Percent correct is well defined for *any* set of trials, so it is provided at trial
-       * level as well: the mean of (correct × 100) over a group of trials is that group's
-       * percent correct. Without this, asking for accuracy against separation distance would
-       * silently produce an empty figure, because accuracy would only exist on session rows
-       * while separation distance only exists on trial rows.
+       * Accuracy is well defined for *any* set of trials, so both forms are provided at trial
+       * level too. Without this, plotting accuracy against separation distance would produce an
+       * empty figure, because accuracy would exist only on session rows while separation
+       * distance exists only on trial rows.
+       *
+       * Read from the parsed trial rather than from `values`, because the raw 0/1
+       * `No. Correct` marker is deliberately not a registry variable — it duplicated
+       * Percent Correct exactly — so nothing maps it onto the row.
        */
-      const correct = values.correct
-      values.percentCorrect = typeof correct === 'number' ? correct * 100 : null
+      values.percentCorrect = trial.correct * 100
+      // A count: 1 for this trial if correct. `aggregation: 'sum'` turns it into a total.
+      values.correctTrials = trial.correct === 1 ? 1 : 0
 
       rows.push({ sessionIndex, trialIndex: trial.index, values })
     }
@@ -117,9 +121,16 @@ export function buildSessionRows(
 
     // Derived session measures.
     const nCorrect = trials.filter((t) => t.correct === 1).length
+    values.correctTrials = nCorrect
     values.percentCorrect = trials.length > 0 ? (nCorrect / trials.length) * 100 : null
     values.trialsAnalysed = trials.length
-    values.correctionTrialCount = trials.filter((t) => t.isCorrectionTrial).length
+    /*
+     * Counted from the whole session, not the filtered set. Counting the filtered set made this
+     * read 0 whenever correction trials were excluded — which is the default — so the one
+     * measure of perseveration was useless exactly when it was most likely to be wanted.
+     * Trials Analysed plus this recovers the total attempt count.
+     */
+    values.correctionTrialCount = session.trials.filter((t) => t.isCorrectionTrial).length
 
     // Per-session means of trial-level variables.
     for (const def of trialDefs) {

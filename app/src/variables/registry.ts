@@ -1,7 +1,7 @@
 import type { Dataset } from '../types'
 
 export type VariableRole = 'IV' | 'DV'
-export type VariableType = 'continuous' | 'categorical' | 'ordinal' | 'count' | 'binary'
+export type VariableType = 'continuous' | 'categorical' | 'ordinal' | 'count'
 export type VariableLevel = 'trial' | 'session' | 'subject'
 export type VariableSource = 'marker' | 'session-info' | 'ratinfo' | 'derived'
 
@@ -22,6 +22,13 @@ export interface VariableDef {
   type: VariableType
   level: VariableLevel
   source: VariableSource
+  /**
+   * How values combine when several rows collapse into one point.
+   *
+   * 'mean' suits a rate or a latency. 'sum' suits a count: the number of correct trials for a
+   * rat is the total across its trials, not their average. Defaults to 'mean'.
+   */
+  aggregation?: 'mean' | 'sum'
   /** Raw ABET marker name, where one exists. Used for the spreadsheet export headers. */
   markerName?: string
   /** True when this variable can be cut into ranges and used as a grouping variable. */
@@ -157,14 +164,35 @@ export const METADATA_VARIABLES: VariableDef[] = [
   },
 ]
 
-/** Session-level values we compute ourselves, so they respect the correction-trial toggle. */
+/**
+ * Values computed from the trial data rather than read off the machine's own summary, so they
+ * follow the correction-trial setting.
+ *
+ * These deliberately supersede the equivalent `End Summary - *` markers, which are fixed at
+ * "first attempts only" and exist only per session. Offering both produced pairs of chips with
+ * the same name and the same numbers, which is what this set replaces.
+ */
 export const DERIVED_SESSION_VARIABLES: VariableDef[] = [
+  {
+    key: 'correctTrials',
+    label: 'Correct Trials',
+    description:
+      'How many trials the rat got right, as a whole number. Pair it with Trials Analysed for the denominator, or use Percent Correct for the rate.',
+    role: 'DV',
+    type: 'count',
+    level: 'session',
+    source: 'derived',
+    // A count totals across trials; averaging would turn it back into a proportion.
+    aggregation: 'sum',
+    binnable: true,
+    ordered: false,
+  },
   {
     key: 'percentCorrect',
     label: 'Percent Correct',
     unit: '%',
     description:
-      'Correct trials as a percentage of trials analysed, recomputed from the trial data so it follows your correction-trial setting.',
+      'Correct trials as a percentage of trials analysed, recomputed from the trial data so it follows your correction-trial setting. Also available per trial, so it can be plotted against Separation Distance.',
     role: 'DV',
     type: 'continuous',
     level: 'session',
@@ -175,11 +203,13 @@ export const DERIVED_SESSION_VARIABLES: VariableDef[] = [
   {
     key: 'trialsAnalysed',
     label: 'Trials Analysed',
-    description: 'How many trial attempts went into this session, after filtering.',
+    description:
+      'How many trial attempts went into this session, after the correction-trial setting is applied.',
     role: 'DV',
     type: 'count',
     level: 'session',
     source: 'derived',
+    aggregation: 'sum',
     binnable: true,
     ordered: false,
   },
@@ -187,11 +217,12 @@ export const DERIVED_SESSION_VARIABLES: VariableDef[] = [
     key: 'correctionTrialCount',
     label: 'Correction Trials',
     description:
-      'Repeat attempts after an error. A measure of perseveration. Only non-zero when correction trials are included.',
+      'Repeat attempts after an error — a measure of perseveration. Always counted from the full session, so it stays meaningful whether or not correction trials are included in the analysis. Trials Analysed plus this gives the total attempt count.',
     role: 'DV',
     type: 'count',
     level: 'session',
     source: 'derived',
+    aggregation: 'sum',
     binnable: true,
     ordered: false,
   },
@@ -206,19 +237,13 @@ export const DERIVED_SESSION_VARIABLES: VariableDef[] = [
  * table still appear, with an auto-generated label, so an unfamiliar schedule is usable
  * rather than blocked.
  */
+/** Shown on every per-trial touch counter, as the counterpart to SESSION_TOTAL_NOTE. */
+const PER_TRIAL_TOUCH_NOTE =
+  'Counted per trial, so the mean is touches per trial and the summary table\u2019s Total column ' +
+  'gives the number altogether. Grouping by this normalises for how many trials a rat ran, ' +
+  'which a whole-session total does not.'
+
 const KNOWN_TRIAL_MARKERS: Record<string, Partial<VariableDef> & { label: string }> = {
-  'Trial Analysis - No. Correct': {
-    key: 'correct',
-    label: 'Correct',
-    description:
-      'Whether the rat chose the correct location on this attempt. Averaging this gives accuracy.',
-    role: 'DV',
-    type: 'binary',
-    levels: [
-      { value: 0, label: 'Incorrect' },
-      { value: 1, label: 'Correct' },
-    ],
-  },
   'Trial Analysis - Distance gp': {
     key: 'distance',
     label: 'Separation Distance',
@@ -295,44 +320,46 @@ const KNOWN_TRIAL_MARKERS: Record<string, Partial<VariableDef> & { label: string
     type: 'continuous',
     binnable: true,
   },
-  'Trial Analysis - Left ITI Touches': { key: 'leftItiTouches', label: 'Left ITI Touches' },
-  'Trial Analysis - Centre ITI touches': { key: 'centreItiTouches', label: 'Centre ITI Touches' },
-  'Trial Analysis - Right ITI Touches': { key: 'rightItiTouches', label: 'Right ITI Touches' },
+  'Trial Analysis - Left ITI Touches': {
+    key: 'leftItiTouches',
+    label: 'Left ITI Touches',
+    description: PER_TRIAL_TOUCH_NOTE,
+  },
+  'Trial Analysis - Centre ITI touches': {
+    key: 'centreItiTouches',
+    label: 'Centre ITI Touches',
+    description: PER_TRIAL_TOUCH_NOTE,
+  },
+  'Trial Analysis - Right ITI Touches': {
+    key: 'rightItiTouches',
+    label: 'Right ITI Touches',
+    description: PER_TRIAL_TOUCH_NOTE,
+  },
   'Trial Analysis - Left Blank Touches - Generic Counter': {
     key: 'leftBlankTouches',
     label: 'Left Blank Touches',
+    description: PER_TRIAL_TOUCH_NOTE,
   },
   'Trial Analysis - Centre Blank Touches - Centre Blank': {
     key: 'centreBlankTouches',
     label: 'Centre Blank Touches',
+    description: PER_TRIAL_TOUCH_NOTE,
   },
   'Trial Analysis - Right Blank Touches - Generic Counter': {
     key: 'rightBlankTouches',
     label: 'Right Blank Touches',
+    description: PER_TRIAL_TOUCH_NOTE,
   },
 }
 
+/** Shown on every whole-session touch counter, since the difference surprises people. */
+const SESSION_TOTAL_NOTE =
+  "ABET's own count for the whole session. This can be higher than the sum of the per-trial " +
+  'counts, because some touches are tallied session-wide without being attributed to any ' +
+  'trial. Use the per-trial version for analysis; use this when you need the whole-session ' +
+  'figure exactly as the machine reported it.'
+
 const KNOWN_SESSION_MARKERS: Record<string, Partial<VariableDef> & { label: string }> = {
-  'End Summary - Trials Completed': {
-    key: 'abetTrialsCompleted',
-    label: 'Trials Completed (ABET)',
-    description: "ABET's own count of trials reached, excluding correction attempts.",
-    type: 'count',
-  },
-  'End Summary - All Trials Completed': {
-    key: 'abetAllAttempts',
-    label: 'All Attempts (ABET)',
-    description: "ABET's own count of every attempt, including correction trials.",
-    type: 'count',
-  },
-  'End Summary - Percentage Correct': {
-    key: 'abetPercentCorrect',
-    label: 'Percent Correct (ABET)',
-    unit: '%',
-    description:
-      "ABET's own accuracy figure, over first attempts only. Use “Percent Correct” instead if you want it to follow your correction-trial setting.",
-    type: 'continuous',
-  },
   'End Summary - Condition': {
     key: 'sessionTimeLimit',
     label: 'Session Time Limit',
@@ -340,20 +367,50 @@ const KNOWN_SESSION_MARKERS: Record<string, Partial<VariableDef> & { label: stri
     type: 'count',
     advanced: true,
   },
-  'End Summary - Left ITI touches': { key: 'sessionLeftItiTouches', label: 'Left ITI Touches (session total)' },
-  'End Summary - Centre ITI touches': { key: 'sessionCentreItiTouches', label: 'Centre ITI Touches (session total)' },
-  'End Summary - Right ITI touches': { key: 'sessionRightItiTouches', label: 'Right ITI Touches (session total)' },
+  // --- Whole-session touch counters -----------------------------------------------------
+  //
+  // These are hidden from the default picker rather than removed, because they are NOT simply
+  // the sum of the matching per-trial counters. ABET tallies some touches session-wide that it
+  // never attributes to any trial, so the session figure can exceed the per-trial sum — in the
+  // reference data by up to 6 touches, which on one measure is 17% of the total. Deleting them
+  // would quietly discard those touches; the per-trial versions plus the summary table's Total
+  // column cover the common case, and these remain under "Show all" when the whole-session
+  // number is what is wanted.
+  'End Summary - Left ITI touches': {
+    key: 'sessionLeftItiTouches',
+    label: 'Left ITI Touches (whole session)',
+    description: SESSION_TOTAL_NOTE,
+    advanced: true,
+  },
+  'End Summary - Centre ITI touches': {
+    key: 'sessionCentreItiTouches',
+    label: 'Centre ITI Touches (whole session)',
+    description: SESSION_TOTAL_NOTE,
+    advanced: true,
+  },
+  'End Summary - Right ITI touches': {
+    key: 'sessionRightItiTouches',
+    label: 'Right ITI Touches (whole session)',
+    description: SESSION_TOTAL_NOTE,
+    advanced: true,
+  },
   'End Summary - Left Blank Touches - Generic Counter': {
     key: 'sessionLeftBlankTouches',
-    label: 'Left Blank Touches (session total)',
+    label: 'Left Blank Touches (whole session)',
+    description: SESSION_TOTAL_NOTE,
+    advanced: true,
   },
   'End Summary - Centre Blank Touches - Centre Blank': {
     key: 'sessionCentreBlankTouches',
-    label: 'Centre Blank Touches (session total)',
+    label: 'Centre Blank Touches (whole session)',
+    description: SESSION_TOTAL_NOTE,
+    advanced: true,
   },
   'End Summary - Right Blank Touches - Generic Counter': {
     key: 'sessionRightBlankTouches',
-    label: 'Right Blank Touches (session total)',
+    label: 'Right Blank Touches (whole session)',
+    description: SESSION_TOTAL_NOTE,
+    advanced: true,
   },
 }
 
@@ -374,12 +431,37 @@ function autoLabel(markerName: string): { key: string; label: string } {
 }
 
 /**
- * `_Counts` companion columns carry no information — ABET writes 0 wherever the event
- * occurred and nothing elsewhere — so they are kept in the spreadsheet export for
- * column-for-column compatibility but hidden from the analysis UI.
+ * Markers superseded by a derived variable that reports the same thing better.
+ *
+ * Each of these produced a second chip with the same name and the same numbers as one of the
+ * derived measures, which made the picker ambiguous. The derived versions win because they
+ * follow the correction-trial setting and, for accuracy, exist per trial as well as per
+ * session — so they can be plotted against Separation Distance, which a session-level summary
+ * value cannot.
+ *
+ * They are hidden from the analysis UI only. Every one of these values is still written to the
+ * Excel export, which reads the markers straight from the parsed session, so the machine's own
+ * figures remain available for cross-checking.
+ */
+const SUPERSEDED_MARKERS = new Set([
+  // -> percentCorrect and correctTrials
+  'Trial Analysis - No. Correct',
+  'End Summary - Percentage Correct',
+  // -> trialsAnalysed
+  'End Summary - Trials Completed',
+  // -> trialsAnalysed + correctionTrialCount
+  'End Summary - All Trials Completed',
+])
+
+/**
+ * Markers with nothing to analyse.
+ *
+ * `_Counts` companion columns carry no information — ABET writes 0 wherever the event occurred
+ * and nothing elsewhere — so they are kept in the spreadsheet export for column-for-column
+ * compatibility but hidden from the analysis UI.
  */
 function isAnalyticallyEmpty(markerName: string): boolean {
-  return markerName.endsWith('_Counts')
+  return markerName.endsWith('_Counts') || SUPERSEDED_MARKERS.has(markerName)
 }
 
 export interface Registry {
