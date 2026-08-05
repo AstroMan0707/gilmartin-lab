@@ -35,10 +35,23 @@ describe('variable registry', () => {
       expect(keys.has(k), `missing IV ${k}`).toBe(true)
       expect(registry.byKey.get(k)?.role).toBe('IV')
     }
-    for (const k of ['percentCorrect', 'rewardLatency', 'correctImageLatency', 'incorrectImageLatency']) {
+    for (const k of ['percentCorrect', 'correctTrials', 'rewardLatency', 'correctImageLatency', 'incorrectImageLatency']) {
       expect(keys.has(k), `missing DV ${k}`).toBe(true)
       expect(registry.byKey.get(k)?.role).toBe('DV')
     }
+  })
+
+  it('offers no duplicate accuracy or trial-count variables', async () => {
+    const registry = buildRegistry(await loadDataset())
+    const keys = new Set(registry.variables.map((v) => v.key))
+
+    // Each of these reported the same numbers as a derived variable under a second name.
+    for (const gone of ['correct', 'abetPercentCorrect', 'abetTrialsCompleted', 'abetAllAttempts']) {
+      expect(keys.has(gone), `${gone} should no longer be offered`).toBe(false)
+    }
+    // No two measures may share a label, which is what made the picker ambiguous.
+    const labels = registry.variables.map((v) => `${v.label}${v.unit ?? ''}`)
+    expect(new Set(labels).size).toBe(labels.length)
   })
 
   it('gives verbose ABET markers readable labels', async () => {
@@ -102,13 +115,46 @@ describe('row building', () => {
     const rows = buildSessionRows(dataset, registry, { includeCorrectionTrials: false })
 
     expect(rows).toHaveLength(3)
-    for (const row of rows) {
+    rows.forEach((row, i) => {
+      // Checked against the machine's own End Summary, read straight from the parsed session.
+      // Those markers are no longer offered as variables, but they remain the reference.
+      const end = dataset.sessions[i].endSummary
       expect(row.values.percentCorrect as number).toBeCloseTo(
-        row.values.abetPercentCorrect as number,
+        end['End Summary - Percentage Correct'] as number,
         2,
       )
-      expect(row.values.trialsAnalysed).toBe(row.values.abetTrialsCompleted)
-    }
+      expect(row.values.trialsAnalysed).toBe(end['End Summary - Trials Completed'])
+      expect(row.values.correctTrials).toBe(
+        dataset.sessions[i].trials.filter((t) => !t.isCorrectionTrial && t.correct === 1).length,
+      )
+      // Trials analysed plus corrections recovers ABET's total attempt count.
+      expect(
+        (row.values.trialsAnalysed as number) + (row.values.correctionTrialCount as number),
+      ).toBe(end['End Summary - All Trials Completed'])
+    })
+  })
+
+  it('counts correct trials as whole numbers, not a proportion', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+    const rows = buildSessionRows(dataset, registry, { includeCorrectionTrials: false })
+
+    const counts = rows.map((r) => r.values.correctTrials as number)
+    expect(counts).toEqual([51, 59, 7])
+    expect(counts.every((c) => Number.isInteger(c))).toBe(true)
+    // The old bug: this variable held 0.75 rather than 51.
+    expect(counts.every((c) => c > 1)).toBe(true)
+  })
+
+  it('keeps counting correction trials when they are excluded from analysis', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+    const excluded = buildSessionRows(dataset, registry, { includeCorrectionTrials: false })
+    const included = buildSessionRows(dataset, registry, { includeCorrectionTrials: true })
+
+    // Previously this read 0 whenever corrections were filtered out, which is the default.
+    expect(excluded.map((r) => r.values.correctionTrialCount)).toEqual([31, 14, 17])
+    expect(included.map((r) => r.values.correctionTrialCount)).toEqual([31, 14, 17])
   })
 })
 
@@ -170,16 +216,16 @@ describe('aggregation unit', () => {
     expect(collapsed[0] as number).toBeCloseTo(present.reduce((a, b) => a + b, 0) / 67, 9)
   })
 
-  it('scales binary variables to percentages exactly once', async () => {
+  it('reports the same accuracy from trial rows and session rows', async () => {
     const dataset = await loadDataset()
     const registry = buildRegistry(dataset)
     const trialRows = buildTrialRows(dataset, registry, { includeCorrectionTrials: false })
     const sessionRows = buildSessionRows(dataset, registry, { includeCorrectionTrials: false })
 
-    // 'correct' is 0/1 on trial rows and a proportion on session rows; both must come out
-    // of `aggregate` on the same 0-100 scale.
-    const fromTrials = aggregate(trialRows, 'correct', ['animalId'], 'trial', registry)
-    const fromSessions = aggregate(sessionRows, 'correct', ['animalId'], 'session', registry)
+    // Percent correct exists at both levels; the two paths must agree, and both must be on a
+    // 0-100 scale rather than one of them being a 0-1 proportion.
+    const fromTrials = aggregate(trialRows, 'percentCorrect', ['animalId'], 'trial', registry)
+    const fromSessions = aggregate(sessionRows, 'percentCorrect', ['animalId'], 'session', registry)
 
     for (const cell of fromTrials) {
       const match = fromSessions.find((c) => c.group.id === cell.group.id)
@@ -188,6 +234,39 @@ describe('aggregation unit', () => {
       expect(cell.stats.mean as number).toBeGreaterThan(1)
       expect(cell.stats.mean as number).toBeLessThanOrEqual(100)
     }
+  })
+
+  it('totals counts instead of averaging them', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+    const trialRows = buildTrialRows(dataset, registry, { includeCorrectionTrials: false })
+
+    // Per rat, Correct Trials is the total number right — not the proportion right.
+    const perRat = aggregate(trialRows, 'correctTrials', ['animalId'], 'subject', registry)
+    const counts = perRat.map((c) => c.stats.mean as number).sort((a, b) => a - b)
+    expect(counts).toEqual([7, 51, 59])
+    expect(counts.every((c) => Number.isInteger(c))).toBe(true)
+
+    // Percent correct over the same rows stays a rate, so the two are no longer the same number.
+    const rate = aggregate(trialRows, 'percentCorrect', ['animalId'], 'subject', registry)
+    for (const cell of rate) {
+      const count = perRat.find((c) => c.group.id === cell.group.id)!
+      expect(cell.stats.mean).not.toBeCloseTo(count.stats.mean as number, 6)
+    }
+  })
+
+  it('averages rates but totals counts when several sessions collapse into one rat', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+    // Two sessions attributed to the same rat, so collapsing has something to do.
+    const rows = buildSessionRows(dataset, registry, { includeCorrectionTrials: false }).slice(0, 2)
+    for (const r of rows) r.values.animalId = 'SAME'
+
+    const count = aggregate(rows, 'correctTrials', [], 'subject', registry)[0]
+    const rate = aggregate(rows, 'percentCorrect', [], 'subject', registry)[0]
+
+    expect(count.stats.mean).toBe(51 + 59)
+    expect(rate.stats.mean as number).toBeCloseTo((75 + 81.94444444444444) / 2, 6)
   })
 })
 
@@ -282,7 +361,7 @@ describe('custom binning', () => {
     const binned = applyBins(rows, spec, computeBins(spec, rows, 's'))
 
     // The point of the whole feature: latency range on the x-axis, accuracy on the y.
-    const cells = aggregate(binned, 'correct', [binnedKey('correctImageLatency')], 'trial', registry)
+    const cells = aggregate(binned, 'percentCorrect', [binnedKey('correctImageLatency')], 'trial', registry)
     expect(cells.length).toBeGreaterThan(1)
     expect(cells.every((c) => c.stats.n > 0)).toBe(true)
     expect(cells.map((c) => c.group.label)).toContain('< 6 s')
@@ -316,7 +395,7 @@ describe('binned group ordering', () => {
     const order = binLabelOrder(result)
 
     // Sorted as text, "≥ 12 s" comes before "6–12 s" — the axis would read out of order.
-    const naive = aggregate(binned, 'correct', [binnedKey('correctImageLatency')], 'trial', registry)
+    const naive = aggregate(binned, 'percentCorrect', [binnedKey('correctImageLatency')], 'trial', registry)
     const ordered = aggregate(
       binned,
       'correct',
@@ -345,9 +424,95 @@ describe('binned group ordering', () => {
     expect(binned).toHaveLength(rows.length - result.missingCount)
     expect(binned.every((r) => r.values[binnedKey('rewardLatency')] !== null)).toBe(true)
 
-    const cells = aggregate(binned, 'correct', [binnedKey('rewardLatency')], 'trial', registry, {
+    const cells = aggregate(binned, 'percentCorrect', [binnedKey('rewardLatency')], 'trial', registry, {
       [binnedKey('rewardLatency')]: binLabelOrder(result),
     })
     expect(cells.map((c) => c.group.label)).not.toContain('—')
+  })
+})
+
+describe('touch counters', () => {
+  /** Per-trial counter paired with the whole-session counter reporting the same thing. */
+  const TOUCH_PAIRS = [
+    ['leftItiTouches', 'sessionLeftItiTouches'],
+    ['centreItiTouches', 'sessionCentreItiTouches'],
+    ['rightItiTouches', 'sessionRightItiTouches'],
+    ['leftBlankTouches', 'sessionLeftBlankTouches'],
+    ['centreBlankTouches', 'sessionCentreBlankTouches'],
+    ['rightBlankTouches', 'sessionRightBlankTouches'],
+  ] as const
+
+  it('keeps the whole-session counters, which are not the sum of the per-trial ones', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+
+    // The reason these cannot be consolidated away: ABET tallies some touches session-wide
+    // without attributing them to any trial, so the session figure exceeds the per-trial sum.
+    // In example-input_1 that is 5 Left, 2 Centre and 3 Right blank touches.
+    const session = dataset.sessions[0]
+    const sumOf = (marker: string) =>
+      session.trials.reduce((n, t) => n + (t.values[marker] ?? 0), 0)
+
+    expect(sumOf('Trial Analysis - Left Blank Touches - Generic Counter')).toBe(123)
+    expect(session.endSummary['End Summary - Left Blank Touches - Generic Counter']).toBe(128)
+    expect(sumOf('Trial Analysis - Right Blank Touches - Generic Counter')).toBe(162)
+    expect(session.endSummary['End Summary - Right Blank Touches - Generic Counter']).toBe(165)
+
+    // Both halves of every pair must remain available, or those touches become unreachable.
+    for (const [perTrial, wholeSession] of TOUCH_PAIRS) {
+      expect(registry.byKey.has(perTrial), `${perTrial} missing`).toBe(true)
+      expect(registry.byKey.has(wholeSession), `${wholeSession} missing`).toBe(true)
+    }
+  })
+
+  it('shows only the per-trial counters by default, halving the picker', async () => {
+    const registry = buildRegistry(await loadDataset())
+    for (const [perTrial, wholeSession] of TOUCH_PAIRS) {
+      expect(registry.byKey.get(perTrial)?.advanced ?? false).toBe(false)
+      expect(registry.byKey.get(wholeSession)?.advanced).toBe(true)
+    }
+  })
+
+  it('reports the number altogether as a Total, whatever the aggregation unit', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+    const rows = buildTrialRows(dataset, registry, { includeCorrectionTrials: true })
+
+    // The total is a property of the data, not of how it is grouped into points.
+    const perRat = aggregate(rows, 'leftBlankTouches', [], 'subject', registry)[0]
+    const perTrial = aggregate(rows, 'leftBlankTouches', [], 'trial', registry)[0]
+    expect(perRat.stats.total).toBe(123 + 78 + 41)
+    expect(perTrial.stats.total).toBe(perRat.stats.total)
+
+    // n still counts data points, so it changes with the unit while the total does not.
+    expect(perRat.stats.n).toBe(3)
+    expect(perTrial.stats.n).toBeGreaterThan(200)
+
+    // The mean stays a per-trial rate, which is what makes it comparable across rats that
+    // ran different numbers of trials.
+    expect(perRat.stats.mean as number).toBeLessThan(5)
+  })
+
+  it('splits totals correctly across groups', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+    const rows = buildTrialRows(dataset, registry, { includeCorrectionTrials: true })
+
+    const byGenotype = aggregate(rows, 'leftBlankTouches', ['genotype'], 'subject', registry)
+    const summed = byGenotype.reduce((n, c) => n + (c.stats.total ?? 0), 0)
+    expect(summed).toBe(123 + 78 + 41)
+  })
+
+  it('reports no total for rates and percentages, where one would be meaningless', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+    const rows = buildTrialRows(dataset, registry, { includeCorrectionTrials: true })
+
+    expect(aggregate(rows, 'percentCorrect', [], 'subject', registry)[0].stats.total).toBeNull()
+    expect(aggregate(rows, 'rewardLatency', [], 'subject', registry)[0].stats.total).toBeNull()
+    // Counts do report one.
+    expect(aggregate(rows, 'correctTrials', [], 'subject', registry)[0].stats.total).toBe(
+      51 + 59 + 7,
+    )
   })
 })

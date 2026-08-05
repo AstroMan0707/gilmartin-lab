@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
+import { clearPresetHash, presetFromHash } from './presets'
 import { useAppStore, type TabId } from './store/useAppStore'
 import { DataTableTab } from './tabs/DataTableTab'
 import { LoadDataTab } from './tabs/LoadDataTab'
@@ -14,8 +15,37 @@ const TABS: { id: TabId; label: string; needsData: boolean }[] = [
 ]
 
 export default function App() {
-  const { tab, setTab, theme, setTheme, dataset } = useAppStore()
+  const { tab, setTab, theme, setTheme, dataset, applyPreset, setPendingPreset } = useAppStore()
   const followedSystemTheme = useRef(false)
+  const readSharedPreset = useRef(false)
+
+  /*
+   * A shared preset link is usually opened before any files exist, so the preset is queued and
+   * applied once data is loaded. The hash is cleared immediately, so reloading the page after
+   * changing the analysis does not silently snap it back.
+   *
+   * The `hashchange` listener matters as much as the mount-time read: pasting a preset link into
+   * the address bar of a tab that already has the app open is a same-document navigation, so
+   * React never re-mounts and a mount-only check would leave the colleague staring at an
+   * unchanged screen wondering why the link did nothing.
+   */
+  useEffect(() => {
+    const applyFromHash = () => {
+      const shared = presetFromHash()
+      if (!shared) return
+      clearPresetHash()
+      if (useAppStore.getState().dataset) applyPreset(shared)
+      else setPendingPreset(shared)
+    }
+
+    if (!readSharedPreset.current) {
+      readSharedPreset.current = true
+      applyFromHash()
+    }
+
+    window.addEventListener('hashchange', applyFromHash)
+    return () => window.removeEventListener('hashchange', applyFromHash)
+  }, [applyPreset, setPendingPreset])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme

@@ -8,6 +8,7 @@ import { buildFigure, plotlyConfig } from '../charts/buildFigure'
 import {
   availableChartTypes,
   CHART_LABELS,
+  measuresLabel,
   resolveLabels,
   unavailableReason,
   type ChartType,
@@ -20,6 +21,7 @@ import type { Dataset } from '../types'
 import { axisTitle, type Registry } from '../variables/registry'
 import { BinEditor } from './playground/BinEditor'
 import { ExportPanel } from './playground/ExportPanel'
+import { PresetPanel } from './playground/PresetPanel'
 import { SummaryTable } from './playground/SummaryTable'
 import { VariableRail } from './playground/VariableRail'
 
@@ -92,7 +94,15 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
   const config = useMemo(() => plotlyConfig(), [])
 
   const primaryDef = registry.byKey.get(spec.measureKeys[0] ?? '')
-  const labels = resolveLabels(spec, registry, primaryDef ? axisTitle(primaryDef) : '')
+  const labels = resolveLabels(
+    spec,
+    registry,
+    spec.measureKeys.length > 1
+      ? measuresLabel(spec, registry)
+      : primaryDef
+        ? axisTitle(primaryDef)
+        : '',
+  )
 
   // Bin editors for whichever continuous variables are currently doing the grouping.
   const binEditors = [spec.xKey, spec.seriesKey]
@@ -176,6 +186,8 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
       </div>
 
       <div className="rail">
+        <PresetPanel registry={registry} />
+
         <div className="card" data-testid="chart-types">
           <div className="card-header">
             <h3>Chart type</h3>

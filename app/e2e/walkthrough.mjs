@@ -105,6 +105,21 @@ async function pickChart(label) {
   if (label !== 'Summary') await page.waitForSelector('.plot .main-svg', { timeout: 20_000 })
 }
 
+/**
+ * Reads the summary table as objects keyed by column header.
+ *
+ * Deliberately not positional: a new column shifts every index, which turns a passing check into
+ * a confusing failure somewhere unrelated.
+ */
+async function summaryRows() {
+  const headers = await page.locator('[data-testid="summary-table"] thead th').allInnerTexts()
+  const rows = await page.locator('[data-testid="summary-table"] tbody tr').evaluateAll((trs) =>
+    trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => (td.textContent ?? '').trim())))
+  return rows.map((cells) =>
+    Object.fromEntries(cells.map((c, i) => [headers[i].trim(), c])),
+  )
+}
+
 /** SVG <text> nodes have no innerText, so read textContent. */
 const svgTexts = (selector) =>
   page.locator(selector).evaluateAll((els) => els.map((e) => (e.textContent ?? '').trim()))
@@ -116,6 +131,8 @@ try {
   // ---------------------------------------------------------------- load ---------------
   await page.goto(BASE_URL, { waitUntil: 'networkidle' })
   check('app loads', await page.getByRole('heading', { name: 'TUNL Parser' }).isVisible())
+  const brand = await page.locator('.app-brand small').innerText()
+  check('the header reports the app version', /v\d+\.\d+\.\d+/.test(brand), brand)
 
   await page.setInputFiles('input[type="file"]', [
     join(FIXTURES, 'example-input_1.xml'),
@@ -155,12 +172,63 @@ try {
   check('summary reports n, SD, SEM and quartiles',
     ['n', 'SD', 'SEM', 'Median', 'Q1', 'Q3', 'IQR', 'Missing'].every((h) => summary.includes(h)))
 
+  // ------------------------------------------- count vs rate are distinct -------------
+  const measureLabels = await testId('measure-chips').locator('button').allInnerTexts()
+  check('the picker offers no duplicate accuracy or trial-count chips',
+    !measureLabels.includes('Correct') &&
+      !measureLabels.some((l) => /ABET/.test(l)) &&
+      new Set(measureLabels).size === measureLabels.length,
+    measureLabels.filter((l) => /Correct|Trials|Attempts/.test(l)).join(' | '))
+
+  await pickMeasure('Correct Trials')
+  await page.waitForTimeout(400)
+  const bothRows = await summaryRows()
+  const countRow = bothRows.find((r) => /^Correct Trials/.test(r.Measure))
+  const rateRow = bothRows.find((r) => /^Percent Correct/.test(r.Measure))
+  check('Correct Trials is a whole-number count, not a ratio',
+    countRow && Number.isInteger(Number(countRow.Mean)) && Number(countRow.Mean) > 1,
+    `Correct Trials mean = ${countRow?.Mean}`)
+  check('Correct Trials and Percent Correct are no longer the same number',
+    countRow && rateRow && countRow.Mean !== rateRow.Mean,
+    `count ${countRow?.Mean} vs rate ${rateRow?.Mean}`)
+  await pickMeasure('Correct Trials') // deselect
+
+  // ------------------------------------------- touch counters consolidated -------------
+  const defaultMeasures = await testId('measure-chips').locator('button').allInnerTexts()
+  check('whole-session touch totals are hidden from the default picker',
+    !defaultMeasures.some((l) => /whole session/i.test(l)) &&
+      defaultMeasures.filter((l) => /Touches/.test(l)).length === 6,
+    `${defaultMeasures.filter((l) => /Touches/.test(l)).length} touch chips by default`)
+
+  await page.getByRole('checkbox', { name: /Show all/i }).check()
+  await page.waitForTimeout(300)
+  const allMeasures = await testId('measure-chips').locator('button').allInnerTexts()
+  check('they are still reachable under Show all, so no data is lost',
+    allMeasures.filter((l) => /whole session/i.test(l)).length === 6,
+    `${allMeasures.filter((l) => /Touches/.test(l)).length} touch chips under Show all`)
+  await page.getByRole('checkbox', { name: /Show all/i }).uncheck()
+  await page.waitForTimeout(300)
+
+  // The Total column is what makes the per-trial counter sufficient for the common case.
+  await pickMeasure('Left Blank Touches')
+  await page.waitForTimeout(500)
+  const touchRow = (await summaryRows()).find((r) => /^Left Blank Touches/.test(r.Measure))
+  // 83 + 66 + 9 over first attempts, which is the default correction-trial setting.
+  check('the summary table reports a Total alongside n',
+    touchRow && Number(touchRow.Total) === 83 + 66 + 9,
+    `n=${touchRow?.n} total=${touchRow?.Total} mean=${touchRow?.Mean}`)
+  check('the mean stays a per-trial rate, not the total',
+    touchRow && Number(touchRow.Mean) < 5, `mean = ${touchRow?.Mean}`)
+  check('a percentage reports no total, since summing percentages is meaningless',
+    (await summaryRows()).find((r) => /^Percent Correct/.test(r.Measure))?.Total === '—')
+  await pickMeasure('Left Blank Touches') // deselect
+
   // ---------------------------------------------------------------- bar ----------------
   await pickVariable('group-session', 'x-chips', 'Genotype')
   await pickChart('Bar chart')
   check('bar chart renders', (await page.locator('.plot g.trace.bars').count()) > 0)
 
-  const nValues = await testId('summary-table').locator('tbody tr td:nth-child(3)').allInnerTexts()
+  const nValues = (await summaryRows()).map((r) => r.n)
   check('each point is a rat, so n stays small (pseudo-replication guard)',
     nValues.length > 0 && nValues.every((n) => Number(n) > 0 && Number(n) <= 3),
     `n = ${nValues.join(', ')}`)
@@ -175,10 +243,10 @@ try {
   await pickMeasure('Percent Correct (%)') // deselect
   await pickMeasure('Correct Response Latency (s)')
   await page.waitForTimeout(500)
-  const nBySubject = await testId('summary-table').locator('tbody tr td:nth-child(3)').allInnerTexts()
+  const nBySubject = (await summaryRows()).map((r) => r.n)
   await page.locator('.chart-area select').first().selectOption('trial')
   await page.waitForTimeout(700)
-  const nByTrial = await testId('summary-table').locator('tbody tr td:nth-child(3)').allInnerTexts()
+  const nByTrial = (await summaryRows()).map((r) => r.n)
   check('per-rat n stays tiny while per-trial n is in the hundreds',
     Math.max(...nBySubject.map(Number)) <= 3 && Math.max(...nByTrial.map(Number)) > 50,
     `per rat n = ${nBySubject.join(', ')}; per trial n = ${nByTrial.join(', ')}`)
@@ -215,11 +283,12 @@ try {
     (await svgTexts('.plot .legend text')).join(', '))
 
   // A session-level measure grouped by a trial-level variable used to render an empty figure.
-  const distStats = await testId('summary-table').locator('tbody tr td:nth-child(3)').allInnerTexts()
+  const distRows = await summaryRows()
+  const distStats = distRows.map((r) => r.n)
   check('accuracy against separation distance actually contains data',
     distStats.length > 0 && distStats.every((n) => Number(n) > 0),
     `n per distance = ${[...new Set(distStats)].join(', ')}`)
-  const distMeans = await testId('summary-table').locator('tbody tr td:nth-child(4)').allInnerTexts()
+  const distMeans = distRows.map((r) => r.Mean)
   check('accuracy per distance is a percentage, not a blank or a proportion',
     distMeans.every((m) => m !== '\u2014') && distMeans.some((m) => Number(m) > 1),
     `means = ${distMeans.slice(0, 4).join(', ')}\u2026`)
@@ -247,7 +316,7 @@ try {
   // ------------------------------------------ custom latency ranges as an IV -----------
   await pickMeasure('Reward Collection Latency (s)') // deselect
   // Accuracy as the measure, latency ranges as the grouping — exactly the user's example.
-  await pickMeasure('Correct')
+  await pickMeasure('Percent Correct (%)')
 
   await pickVariable('group-range', 'x-chips', 'Correct Response Latency (s)')
   await page.waitForSelector('[data-testid="bin-editor"]', { timeout: 10_000 })
@@ -373,6 +442,65 @@ try {
       /will not match an ABET CSV/.test(readme) && /Excluded/.test(readme))
   }
   await shot('07-data-table')
+
+  // -------------------------------------------------------------- presets -------------
+  await navTab('Visualisation playground').click()
+  await page.waitForSelector('.playground')
+  // Start from a known selection: the chips are toggles, so clicking one that an earlier step
+  // left active would switch it off rather than on.
+  const clearSelection = page.getByRole('button', { name: 'Clear selection', exact: true })
+  if (await clearSelection.count()) {
+    await clearSelection.click()
+    await page.waitForTimeout(300)
+  }
+  await pickMeasure('Percent Correct (%)')
+  await pickVariable('group-session', 'x-chips', 'Genotype')
+  await pickChart('Bar chart')
+
+  const presets = testId('preset-panel')
+  await presets.locator('input[type="text"]').fill('Accuracy by genotype')
+  await presets.locator('[data-testid="save-preset"]').click()
+  await page.waitForTimeout(400)
+  check('an analysis can be saved as a preset',
+    (await presets.locator('.preset-list li').count()) === 1,
+    (await presets.locator('.preset-open span').first().innerText()).replace(/\s+/g, ' '))
+
+  const stored = await page.evaluate(() => localStorage.getItem('tunl-parser.presets.v1') ?? '')
+  check('a preset stores chart settings only, never animal data',
+    stored.length > 0 && !/LZ\d|\.xml|\.xlsx/.test(stored),
+    `${stored.length} bytes stored`)
+
+  // Reloading clears the data but must keep the preset — that is the whole point.
+  const shareUrl = await page.evaluate(() => {
+    const p = JSON.parse(localStorage.getItem('tunl-parser.presets.v1'))[0]
+    const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(p))))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    return `${location.origin}${location.pathname}#preset=${b64}`
+  })
+  await page.reload({ waitUntil: 'networkidle' })
+  check('reloading clears the data, as designed',
+    (await page.locator('.dropzone').count()) === 1)
+
+  // A shared link, opened cold, reproduces the analysis once files are loaded.
+  await page.goto(shareUrl, { waitUntil: 'networkidle' })
+  await page.setInputFiles('input[type="file"]', [
+    join(FIXTURES, 'example-input_1.xml'),
+    join(FIXTURES, 'example-output_2.xml'),
+    join(FIXTURES, 'example-output_3.xml'),
+    join(FIXTURES, 'Rat Info.xlsx'),
+  ])
+  await page.getByRole('button', { name: /^Load 3 sessions/ }).click()
+  await page.waitForSelector('.playground', { timeout: 30_000 })
+  await page.waitForTimeout(600)
+
+  const activeMeasures = await testId('measure-chips').locator('button').evaluateAll((bs) =>
+    bs.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent.trim()))
+  check('a shared preset link reproduces the analysis for someone else',
+    activeMeasures.length === 1 && /^Percent Correct/.test(activeMeasures[0]),
+    activeMeasures.join(', '))
+  check('the link is consumed, so reloading does not snap the analysis back',
+    (await page.evaluate(() => location.hash)) === '')
+  await shot('09-presets')
 
   // -------------------------------------------------------------- dark mode -----------
   await page.getByRole('button', { name: /Switch to dark mode/i }).click()

@@ -1,4 +1,4 @@
-import { aggregate, effectiveUnit, fmt, type AggregationUnit } from '../../analysis/aggregate'
+import { aggregate, fmt, type AggregationUnit } from '../../analysis/aggregate'
 import type { AnalysisRow } from '../../analysis/rows'
 import { withBins } from '../../charts/buildFigure'
 import type { ChartSpec } from '../../charts/spec'
@@ -51,6 +51,7 @@ export function SummaryTable({
               <th>Measure</th>
               {hasGrouping && <th>Group</th>}
               <th className="numeric">n</th>
+              <th className="numeric">Total</th>
               <th className="numeric">Mean</th>
               <th className="numeric">SD</th>
               <th className="numeric">SEM</th>
@@ -66,11 +67,7 @@ export function SummaryTable({
           <tbody>
             {spec.measureKeys.flatMap((measureKey) => {
               const def = registry.byKey.get(measureKey)
-              const label = def
-                ? effectiveUnit(def) === '%' && def.type === 'binary'
-                  ? `${def.label} (%)`
-                  : axisTitle(def)
-                : measureKey
+              const label = def ? axisTitle(def) : measureKey
 
               return aggregate(prepared, measureKey, groupingKeys, spec.unit, registry, levelOrder).map(
                 (cell) => (
@@ -78,6 +75,9 @@ export function SummaryTable({
                     <td>{label}</td>
                     {hasGrouping && <td>{cell.group.label}</td>}
                     <td className="numeric">{cell.stats.n}</td>
+                    <td className={`numeric${cell.stats.total === null ? ' empty' : ''}`}>
+                      {fmt(cell.stats.total)}
+                    </td>
                     <td className="numeric">{fmt(cell.stats.mean)}</td>
                     <td className="numeric">{fmt(cell.stats.sd)}</td>
                     <td className="numeric">{fmt(cell.stats.sem)}</td>
@@ -99,9 +99,13 @@ export function SummaryTable({
       </div>
 
       <p className="hint">
-        SD and SEM are blank where a group holds a single observation — one value has no
-        spread. &quot;Missing&quot; counts observations with no value for that measure, such as
-        trials where no reward was collected; they are left out rather than counted as zero.
+        <strong>n</strong> is the number of data points — rats, sessions or trials, whichever you
+        chose above. <strong>Total</strong> is the sum of every underlying observation in the
+        group, so it answers &quot;how many altogether&quot; while the mean answers &quot;how many
+        each&quot;; it is shown only for counts, since a total of percentages or latencies has no
+        meaning. SD and SEM are blank where a group holds a single observation — one value has no
+        spread. <strong>Missing</strong> counts observations with no value for that measure, such
+        as trials where no reward was collected; they are left out rather than counted as zero.
       </p>
     </div>
   )
