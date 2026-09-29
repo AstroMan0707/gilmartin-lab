@@ -104,4 +104,59 @@ describe('line graphs', () => {
     expect(at(wt, '5')).not.toBeNull()
     expect(ad.connectgaps).toBe(false)
   })
+
+  type Line = { name: string; x: (number | string)[]; y: (number | null)[]; customdata: string[] }
+  type Axis = { type: string; tickvals?: (number | string)[]; ticktext?: string[] }
+  const lineSpec = (xKey: string, seriesKey: string | null = null) => ({
+    ...defaultSpec(), type: 'line' as const, measureKeys: ['percentCorrect'], xKey, seriesKey,
+  })
+
+  it('space delays to scale, not one step per value', async () => {
+    // The fixtures run at 0 s and 20 s delays. As categories those sat one step apart, the
+    // same as 0 s and 2 s would.
+    const { registry, rows } = await setup()
+    const figure = buildFigure(rows, lineSpec('delaySec'), registry, PRINT_THEME)
+    const axis = figure.layout.xaxis as Axis
+    expect(axis.type).toBe('linear')
+    expect(axis.tickvals).toEqual([0, 20])
+    expect(axis.ticktext).toEqual(figure.data.length ? (figure.data[0] as Line).customdata : [])
+    expect((figure.data[0] as Line).x).toEqual([0, 20])
+  })
+
+  it('space test dates by the days between them', async () => {
+    const { registry, rows } = await setup()
+    // One session on each of three dates, the last five days after the second.
+    const dates = ['2026-07-14', '2026-07-15', '2026-07-20']
+    const dated = rows.map((r) => ({ ...r, values: { ...r.values, testDay: dates[r.sessionIndex] } }))
+    const figure = buildFigure(dated, lineSpec('testDay'), registry, PRINT_THEME)
+    expect((figure.layout.xaxis as Axis).type).toBe('date')
+    expect((figure.data[0] as Line).x).toEqual(dates)
+  })
+
+  it('join each line through its own points on a to-scale axis', async () => {
+    // WT tested on the 14th and the 20th, AD on the 15th in between. WT's line joins its
+    // two dates, rather than breaking at a date only AD has.
+    const { registry, rows } = await setup()
+    const dates = ['2026-07-14', '2026-07-20', '2026-07-15']
+    const dated = rows.map((r) => ({ ...r, values: { ...r.values, testDay: dates[r.sessionIndex] } }))
+    const lines = buildFigure(dated, lineSpec('testDay', 'genotype'), registry, PRINT_THEME).data as Line[]
+    const wt = lines.find((l) => l.name === 'WT')!
+    expect(wt.x).toEqual(['2026-07-14', '2026-07-20'])
+    expect(wt.y.every((v) => v !== null)).toBe(true)
+  })
+
+  it('leave the ticks to Plotly when there are too many values to label', async () => {
+    // Time in Session has a value per trial; a tick at each would be unreadable.
+    const { registry, rows } = await setup()
+    const axis = buildFigure(rows, lineSpec('trialEndSec'), registry, PRINT_THEME).layout.xaxis as Axis
+    expect(axis.type).toBe('linear')
+    expect(axis.tickvals).toBeUndefined()
+  })
+
+  it('keep an axis that steps by one as evenly spaced categories', async () => {
+    const { registry, rows } = await setup()
+    const axis = buildFigure(rows, lineSpec('distance'), registry, PRINT_THEME).layout.xaxis as Axis
+    expect(axis.type).toBe('category')
+  })
 })
+

@@ -35,6 +35,12 @@ export interface VariableDef {
   binnable: boolean
   /** True when values have a meaningful order, making it valid as a line-graph x-axis. */
   ordered: boolean
+  /**
+   * For an ordered variable whose spacing carries meaning — delays of 0, 2 and 20 s, dates a
+   * week apart — how a line graph places it: to scale rather than one step per value. Absent
+   * for ones that step by one, such as session number, where even spacing is already true.
+   */
+  scale?: 'linear' | 'date'
   /** Display labels for coded values, e.g. sample side 1 -> "Left". */
   levels?: VariableLevelLabel[]
   /** Hidden from the default variable picker; still available via "show all". */
@@ -91,6 +97,7 @@ export const METADATA_VARIABLES: VariableDef[] = [
     source: 'derived',
     binnable: false,
     ordered: true,
+    scale: 'linear',
   },
   {
     key: 'sessionNumber',
@@ -126,6 +133,7 @@ export const METADATA_VARIABLES: VariableDef[] = [
     source: 'derived',
     binnable: true,
     ordered: true,
+    scale: 'linear',
   },
   {
     key: 'testDay',
@@ -137,6 +145,7 @@ export const METADATA_VARIABLES: VariableDef[] = [
     source: 'session-info',
     binnable: false,
     ordered: true,
+    scale: 'date',
   },
   {
     key: 'chamber',
@@ -289,6 +298,7 @@ const KNOWN_TRIAL_MARKERS: Record<string, Partial<VariableDef> & { label: string
     role: 'IV',
     type: 'continuous',
     ordered: true,
+    scale: 'linear',
     binnable: true,
     advanced: true,
   },
@@ -549,6 +559,7 @@ export function buildRegistry(dataset: Dataset): Registry {
         markerName,
         binnable: known?.binnable ?? (known?.type === 'continuous' || !known),
         ordered: known?.ordered ?? false,
+        scale: known?.scale,
         levels: known?.levels,
         advanced: known?.advanced,
       },

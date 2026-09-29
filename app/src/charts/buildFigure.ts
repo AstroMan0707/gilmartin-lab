@@ -7,7 +7,7 @@ import {
   type LevelOrder,
 } from '../analysis/aggregate'
 import { applyBins, binLabelOrder, computeBins } from '../analysis/binning'
-import type { AnalysisRow } from '../analysis/rows'
+import type { AnalysisRow, CellValue } from '../analysis/rows'
 import type { Registry, VariableDef } from '../variables/registry'
 import { axisTitle } from '../variables/registry'
 import type { ChartSpec } from './spec'
@@ -416,6 +416,21 @@ function buildBarOrBox(
 // Line
 // --------------------------------------------------------------------------------------
 
+/** A to-scale x-axis for a line graph, and its ticks when there are few enough to label. */
+interface XScale {
+  type: 'linear' | 'date'
+  ticks: { values: (number | string)[]; labels: string[] } | null
+}
+
+/** Beyond this many distinct values, Plotly places the ticks rather than one per value. */
+const MAX_LABELLED_TICKS = 12
+
+/** Numbers numerically; ISO dates and other text in string order, which for dates is time order. */
+function compareValues(a: CellValue, b: CellValue): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  return String(a).localeCompare(String(b))
+}
+
 function buildLine(
   rows: AnalysisRow[],
   spec: ChartSpec,
@@ -431,9 +446,29 @@ function buildLine(
   const csvRows: (string | number | null)[][] = []
 
   const xKey = spec.xKey as string
-  const xLevels = levelsOf(rows, xKey, registry, levelOrder)
+  const xGroups = groupBy(rows, [xKey], registry, levelOrder)
+  const xLevels = xGroups.map((g) => g.label)
   const seriesLevels = spec.seriesKey ? levelsOf(rows, spec.seriesKey, registry, levelOrder) : ['']
   const colours = assignSeriesColours(seriesLevels, seriesLevels, theme)
+
+  /*
+   * A variable whose spacing means something — delays of 0, 2 and 20 s, dates a week apart —
+   * is drawn on a true numeric or date axis; one step per value made 0 to 2 s look as long as
+   * 2 to 20 s. Ranges from a binned variable are always categories.
+   */
+  const scale = xKey.endsWith('__bin') ? undefined : registry.byKey.get(xKey)?.scale
+  const placed = (value: CellValue): value is number | string => value !== null && value !== ''
+  const xScale: XScale | undefined = scale && {
+    type: scale,
+    // Ticks at the data values while there are few enough to label, as the categories were.
+    ticks:
+      xGroups.length <= MAX_LABELLED_TICKS
+        ? {
+            values: xGroups.map((g) => g.key[0].value).filter(placed),
+            labels: xGroups.filter((g) => placed(g.key[0].value)).map((g) => g.label),
+          }
+        : null,
+  }
 
   panels.forEach((measureKey, panelIndex) => {
     const def = registry.byKey.get(measureKey)
@@ -448,12 +483,31 @@ function buildLine(
       const colour = colours.get(seriesGroup.label) ?? theme.series[0]
       const name = seriesGroup.label || (def?.label ?? measureKey)
 
-      // Every line runs over the whole x-axis, with null where this series has no data. Listing
-      // only the levels the series has made Plotly join, say, session 1 straight to session 3,
-      // since it never saw session 2 was missing; a null is what `connectgaps: false` breaks on.
-      const byLevel = new Map(cells.map((c) => [c.group.label, c.stats]))
-      const means = xLevels.map((level) => byLevel.get(level)?.mean ?? null)
-      const sems = xLevels.map((level) => byLevel.get(level)?.sem ?? null)
+      let x: (number | string)[]
+      let pointLabels: string[]
+      let means: (number | null)[]
+      let sems: (number | null)[]
+      if (xScale) {
+        // To scale, each line joins its own measurements, in order: the spacing shows how far
+        // apart they are. Breaking at values only other series have would cut rats tested on
+        // alternate days into lone points.
+        const own = cells
+          .filter((c) => placed(c.group.key[0].value) && c.stats.mean !== null)
+          .sort((a, b) => compareValues(a.group.key[0].value, b.group.key[0].value))
+        x = own.map((c) => c.group.key[0].value as number | string)
+        pointLabels = own.map((c) => c.group.label)
+        means = own.map((c) => c.stats.mean)
+        sems = own.map((c) => c.stats.sem)
+      } else {
+        // Every line runs over the whole x-axis, with null where this series has no data.
+        // Listing only the levels the series has made Plotly join, say, distance 4 straight
+        // to 6, since it never saw 5 was missing; a null is what `connectgaps: false` breaks on.
+        const byLevel = new Map(cells.map((c) => [c.group.label, c.stats]))
+        x = xLevels
+        pointLabels = xLevels
+        means = xLevels.map((level) => byLevel.get(level)?.mean ?? null)
+        sems = xLevels.map((level) => byLevel.get(level)?.sem ?? null)
+      }
 
       data.push({
         type: 'scatter',
@@ -461,8 +515,10 @@ function buildLine(
         name,
         legendgroup: seriesGroup.label,
         showlegend: panelIndex === 0 && seriesGroups.length > 1,
-        x: xLevels,
+        x,
         y: means,
+        // The formatted value ("20 s"), for the hover label; `x` may be a raw number or date.
+        customdata: pointLabels,
         error_y: spec.showErrorBars ? errorBar(sems, theme) : undefined,
         line: { color: colour, width: 2 },
         marker: {
@@ -477,7 +533,7 @@ function buildLine(
         xaxis: `x${axisSuffix}`,
         yaxis: `y${axisSuffix}`,
         hovertemplate:
-          `${seriesGroup.label ? `${seriesGroup.label}<br>` : ''}%{x}<br>${measureLabel(def)}: %{y:.3f}` +
+          `${seriesGroup.label ? `${seriesGroup.label}<br>` : ''}%{customdata}<br>${measureLabel(def)}: %{y:.3f}` +
           (spec.showErrorBars ? ' ± %{error_y.array:.3f} SEM' : '') +
           '<extra></extra>',
       })
@@ -500,7 +556,7 @@ function buildLine(
     registry,
     multiPanel ? measuresLabel(spec, registry) : measureLabel(registry.byKey.get(panels[0])),
   )
-  const layout = panelLayout(panels, spec, registry, theme, labels, xLevels)
+  const layout = panelLayout(panels, spec, registry, theme, labels, xLevels, xScale)
 
   return { data, layout, plottedValues: { columns: csvColumns, rows: csvRows }, notices }
 }
@@ -522,6 +578,8 @@ function panelLayout(
   theme: ChartTheme,
   labels: { title: string; xLabel: string; yLabel: string },
   xLevels: string[],
+  /** A to-scale axis for a line graph; otherwise one evenly spaced category per level. */
+  xScale?: XScale,
 ): PlotlyLayout {
   const base = baseLayout(theme)
   const layout: PlotlyLayout = {
@@ -548,16 +606,23 @@ function panelLayout(
     }
     layout[`xaxis${suffix}`] = {
       ...axisStyle(theme),
-      // Only the bottom panel carries the x-axis title, and category order is fixed by the
-      // grouping so panels stay aligned.
+      // Only the bottom panel carries the x-axis title, and category order (or the scale) is
+      // fixed by the grouping so panels stay aligned.
       title: { text: i === n - 1 ? labels.xLabel : '' },
       showticklabels: i === n - 1,
       // A vertical line at each bar or box reads as an error bar. Lines keep them, where they
       // help read a value across.
       showgrid: spec.type === 'line',
-      type: 'category',
-      categoryorder: 'array',
-      categoryarray: xLevels,
+      ...(xScale
+        ? {
+            type: xScale.type,
+            ...(xScale.ticks && {
+              tickmode: 'array',
+              tickvals: xScale.ticks.values,
+              ticktext: xScale.ticks.labels,
+            }),
+          }
+        : { type: 'category', categoryorder: 'array', categoryarray: xLevels }),
       anchor: `y${suffix}`,
       matches: i === 0 ? undefined : 'x',
     }
