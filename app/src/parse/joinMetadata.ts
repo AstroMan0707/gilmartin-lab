@@ -11,10 +11,13 @@ const MS_PER_DAY = 86_400_000
  * Joins subject metadata onto parsed sessions and derives the cross-session fields the
  * analysis layer needs.
  *
- * Precedence follows the brief: the XML is authoritative for anything it records, and the
- * Rat Info sheet fills in what is missing (genotype, set, birthday, and sex for schedules
- * that do not record it). Conflicts are surfaced as warnings rather than silently
- * resolved, because a genotype/sex mismatch usually means a rat was run under the wrong
+ * Rat Info supplies genotype, set and birthday, which the XML does not record. Sex is
+ * recorded by both, and Rat Info wins: sex belongs to the rat, and Rat Info is the one
+ * record with a single row per rat, whereas the XML's Sex is typed per session and can
+ * vary between a rat's sessions. Taking it per session put one rat in both sex groups and
+ * counted it twice. The XML fills in only for rats Rat Info has no sex for, and only when
+ * all of that rat's sessions agree. Conflicts are surfaced as warnings rather than
+ * silently resolved, because a sex mismatch usually means a rat was run under the wrong
  * ID and the user needs to know before they publish the figure.
  */
 export function joinMetadata(
@@ -27,6 +30,18 @@ export function joinMetadata(
   // --- Join and resolve conflicting fields -------------------------------------------
   const unmatched = new Map<string, string[]>()
   const sexConflicts: string[] = []
+
+  // Every sex the session files record for each rat, keyed as session numbering keys it.
+  // Used only where Rat Info has no sex; one value per rat, or none if the files disagree.
+  const xmlSexes = new Map<string, Set<'F' | 'M'>>()
+  for (const s of parsedSessions) {
+    if (!s.sexXml) continue
+    const key = s.animalId || s.fileName
+    const set = xmlSexes.get(key) ?? new Set()
+    set.add(s.sexXml)
+    xmlSexes.set(key, set)
+  }
+  const inconsistentXmlSex = new Set<string>()
 
   const joined: Session[] = parsedSessions.map((session) => {
     const subject = byId.get(session.animalId) ?? null
@@ -43,7 +58,13 @@ export function joinMetadata(
       )
     }
 
-    const sex = session.sexXml ?? subject?.sex ?? null
+    let sex: 'F' | 'M' | null = subject?.sex ?? null
+    if (!sex) {
+      const key = session.animalId || session.fileName
+      const recorded = xmlSexes.get(key)
+      if (recorded?.size === 1) [sex] = recorded
+      else if (recorded && recorded.size > 1) inconsistentXmlSex.add(key)
+    }
 
     const ageDays =
       subject?.birthday && session.testDay
@@ -125,8 +146,17 @@ export function joinMetadata(
   if (sexConflicts.length > 0) {
     warnings.push({
       kind: 'sex-conflict',
-      message: `Sex disagrees between the session files and Rat Info for ${sexConflicts.length} session(s). The session file is used. ${sexConflicts.join('; ')}`,
+      message: `Sex disagrees between the session files and Rat Info for ${sexConflicts.length} session(s). Rat Info is used. ${sexConflicts.join('; ')}`,
       subjects: [...new Set(sexConflicts.map((c) => c.split(':')[0]))],
+    })
+  }
+
+  if (inconsistentXmlSex.size > 0) {
+    const ids = [...inconsistentXmlSex]
+    warnings.push({
+      kind: 'sex-conflict',
+      message: `The session files disagree on the sex of ${ids.join(', ')}, and Rat Info does not record it, so sex is blank for ${ids.length === 1 ? 'this rat' : 'these rats'}. Add ${ids.length === 1 ? 'it' : 'them'} to Rat Info to fix this.`,
+      subjects: ids,
     })
   }
 

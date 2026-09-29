@@ -296,6 +296,8 @@ Useful if you are extending the parser or adapting it to another schedule.
   rather than being dropped.
 - **Subject info** is joined on the identifier with whitespace removed and capitalisation ignored,
   because the two sources routinely disagree on formatting — sometimes inconsistently within a
-  single file. Dates stored as bare spreadsheet serial numbers are converted. Where both sources
-  record the same field the session file wins, and any disagreement is reported rather than
-  silently resolved.
+  single file. Dates stored as bare spreadsheet serial numbers are converted. Sex is the one field
+  both sources record, and the subject-info sheet wins: sex belongs to the rat, while the session
+  file's Sex is typed per session and can vary between a rat's sessions, which would put one rat in
+  both groups. The session file fills in only for a rat the sheet has no sex for, and only if all
+  of that rat's sessions agree. Any disagreement is reported rather than silently resolved.
