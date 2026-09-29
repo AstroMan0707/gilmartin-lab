@@ -2,6 +2,7 @@ import { aggregate, fmt, type AggregationUnit } from '../../analysis/aggregate'
 import type { AnalysisRow } from '../../analysis/rows'
 import { withBins } from '../../charts/buildFigure'
 import type { ChartSpec } from '../../charts/spec'
+import { downloadBlob, plottedValuesToCsv } from '../../export/figureOptions'
 import type { Registry } from '../../variables/registry'
 import { axisTitle } from '../../variables/registry'
 
@@ -37,11 +38,39 @@ export function SummaryTable({
   const groupingKeys = [spec.xKey, spec.seriesKey].filter((k): k is string => k !== null)
   const hasGrouping = groupingKeys.length > 0
 
+  const tableRows = spec.measureKeys.flatMap((measureKey) => {
+    const def = registry.byKey.get(measureKey)
+    const label = def ? axisTitle(def) : measureKey
+    return aggregate(prepared, measureKey, groupingKeys, spec.unit, registry, levelOrder).map(
+      (cell) => ({ measureKey, label, cell }),
+    )
+  })
+
+  // The table as shown, at full precision rather than the three decimals on screen.
+  const downloadCsv = () => {
+    const columns = [
+      'Measure',
+      ...(hasGrouping ? ['Group'] : []),
+      'n', 'Total', 'Mean', 'SD', 'SEM', 'Median', 'Q1', 'Q3', 'IQR', 'Min', 'Max', 'Missing',
+    ]
+    const rows = tableRows.map(({ label, cell: { group, stats: s } }) => [
+      label,
+      ...(hasGrouping ? [group.label] : []),
+      s.n, s.total, s.mean, s.sd, s.sem, s.median, s.q1, s.q3, s.iqr, s.min, s.max, s.missing,
+    ])
+    downloadBlob(plottedValuesToCsv({ columns, rows }), 'summary_statistics.csv')
+  }
+
   return (
     <div className="card" data-testid="summary-table">
       <div className="card-header">
         <h3>Summary statistics</h3>
-        <span className="pill">one row per {UNIT_NOUN[spec.unit]}</span>
+        <div className="row" style={{ gap: '0.5rem' }}>
+          <span className="pill">n counts {UNIT_NOUN[spec.unit]}</span>
+          <button className="btn btn-quiet" onClick={downloadCsv} disabled={tableRows.length === 0}>
+            Download CSV
+          </button>
+        </div>
       </div>
 
       <div className="table-scroll" style={{ maxHeight: '26rem' }}>
@@ -65,35 +94,28 @@ export function SummaryTable({
             </tr>
           </thead>
           <tbody>
-            {spec.measureKeys.flatMap((measureKey) => {
-              const def = registry.byKey.get(measureKey)
-              const label = def ? axisTitle(def) : measureKey
-
-              return aggregate(prepared, measureKey, groupingKeys, spec.unit, registry, levelOrder).map(
-                (cell) => (
-                  <tr key={`${measureKey}:${cell.group.id}`}>
-                    <td>{label}</td>
-                    {hasGrouping && <td>{cell.group.label}</td>}
-                    <td className="numeric">{cell.stats.n}</td>
-                    <td className={`numeric${cell.stats.total === null ? ' empty' : ''}`}>
-                      {fmt(cell.stats.total)}
-                    </td>
-                    <td className="numeric">{fmt(cell.stats.mean)}</td>
-                    <td className="numeric">{fmt(cell.stats.sd)}</td>
-                    <td className="numeric">{fmt(cell.stats.sem)}</td>
-                    <td className="numeric">{fmt(cell.stats.median)}</td>
-                    <td className="numeric">{fmt(cell.stats.q1)}</td>
-                    <td className="numeric">{fmt(cell.stats.q3)}</td>
-                    <td className="numeric">{fmt(cell.stats.iqr)}</td>
-                    <td className="numeric">{fmt(cell.stats.min)}</td>
-                    <td className="numeric">{fmt(cell.stats.max)}</td>
-                    <td className={`numeric${cell.stats.missing === 0 ? ' empty' : ''}`}>
-                      {cell.stats.missing}
-                    </td>
-                  </tr>
-                ),
-              )
-            })}
+            {tableRows.map(({ measureKey, label, cell }) => (
+              <tr key={`${measureKey}:${cell.group.id}`}>
+                <td>{label}</td>
+                {hasGrouping && <td>{cell.group.label}</td>}
+                <td className="numeric">{cell.stats.n}</td>
+                <td className={`numeric${cell.stats.total === null ? ' empty' : ''}`}>
+                  {fmt(cell.stats.total)}
+                </td>
+                <td className="numeric">{fmt(cell.stats.mean)}</td>
+                <td className="numeric">{fmt(cell.stats.sd)}</td>
+                <td className="numeric">{fmt(cell.stats.sem)}</td>
+                <td className="numeric">{fmt(cell.stats.median)}</td>
+                <td className="numeric">{fmt(cell.stats.q1)}</td>
+                <td className="numeric">{fmt(cell.stats.q3)}</td>
+                <td className="numeric">{fmt(cell.stats.iqr)}</td>
+                <td className="numeric">{fmt(cell.stats.min)}</td>
+                <td className="numeric">{fmt(cell.stats.max)}</td>
+                <td className={`numeric${cell.stats.missing === 0 ? ' empty' : ''}`}>
+                  {cell.stats.missing}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -104,8 +126,10 @@ export function SummaryTable({
         group, so it answers &quot;how many altogether&quot; while the mean answers &quot;how many
         each&quot;; it is shown only for counts, since a total of percentages or latencies has no
         meaning. SD and SEM are blank where a group holds a single observation — one value has no
-        spread. <strong>Missing</strong> counts observations with no value for that measure, such
-        as trials where no reward was collected; they are left out rather than counted as zero.
+        spread. <strong>Missing</strong> counts data points of the same kind as n that have no
+        value for that measure, such as trials where no reward was collected, or a rat with no
+        rewarded trials at all. They are left out rather than counted as zero, so n plus Missing is
+        every rat, session or trial in the group.
       </p>
     </div>
   )

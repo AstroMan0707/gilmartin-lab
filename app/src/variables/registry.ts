@@ -471,6 +471,21 @@ export interface Registry {
   markerToKey: Map<string, string>
 }
 
+/** Identity fields, shown first in the Data table. */
+const DATA_TABLE_IDENTITY = ['animalId', 'genotype', 'sex', 'set', 'sessionNumber', 'delaySec', 'testDay']
+
+/**
+ * The columns of the Data table at each level, identity fields first. The trial view leaves
+ * out session-level variables, which trial rows do not carry; the session view shows all.
+ */
+export function dataTableKeys(registry: Registry, level: 'trial' | 'session'): string[] {
+  const rest = registry.variables
+    .filter((v) => !DATA_TABLE_IDENTITY.includes(v.key))
+    .filter((v) => level === 'session' || v.level !== 'session')
+    .map((v) => v.key)
+  return [...DATA_TABLE_IDENTITY, ...rest].filter((k) => registry.byKey.has(k))
+}
+
 /**
  * Builds the variable list for a loaded dataset.
  *

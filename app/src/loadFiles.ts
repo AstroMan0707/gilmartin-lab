@@ -150,6 +150,31 @@ export function categoriseFiles(files: File[]): {
   return { xmlFiles, ratInfoFiles, ignored }
 }
 
+/**
+ * Adds newly picked files to the files already chosen. Session files accumulate,
+ * de-duplicated by name and size so dropping the same folder twice is harmless; a new Rat
+ * Info spreadsheet replaces the old one. Returns the files that were neither.
+ */
+export function mergeFiles(current: LoadInput, incoming: File[]): { files: LoadInput; ignored: File[] } {
+  const { xmlFiles, ratInfoFiles, ignored } = categoriseFiles(incoming)
+  const seen = new Set(current.xmlFiles.map((f) => `${f.name}:${f.size}`))
+  const added: File[] = []
+  for (const f of xmlFiles) {
+    const key = `${f.name}:${f.size}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      added.push(f)
+    }
+  }
+  return {
+    files: {
+      xmlFiles: [...current.xmlFiles, ...added],
+      ratInfoFile: ratInfoFiles[0] ?? current.ratInfoFile,
+    },
+    ignored,
+  }
+}
+
 /** Recursively collects files from a drag-and-drop, so a whole folder can be dropped. */
 export async function filesFromDataTransfer(dataTransfer: DataTransfer): Promise<File[]> {
   const entries = [...dataTransfer.items]

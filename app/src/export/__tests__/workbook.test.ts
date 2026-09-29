@@ -74,9 +74,10 @@ describe('workbook export', () => {
     expect(header[0]).toBe('Database')
     expect(header).toContain('Trial Analysis - Reward Collection Latency_Duration')
     // Metadata is appended after ABET's own columns, not interleaved.
-    expect(header.slice(-8)).toEqual([
+    expect(header.slice(-9)).toEqual([
       'Attempt No.',
       'Is Correction Trial',
+      'Correct',
       'Genotype',
       'Set',
       'Age at Test (days)',
@@ -119,6 +120,30 @@ describe('workbook export', () => {
     for (const row of rows.slice(1)) {
       expect(row[derived] as number).toBeCloseTo(row[abet] as number, 2)
       expect(row[analysed]).toBe(row[abetCompleted])
+    }
+  })
+
+  it('scores correct correction trials as correct in both sheets', async () => {
+    const sheets = await roundTrip(true)
+    const trials = sheetByName(sheets, 'Trial Data')
+    const correctCol = trials[0].map(String).indexOf('Correct')
+    const totalCorrect = trials.slice(1).reduce((n, r) => n + (r[correctCol] as number), 0)
+    // 51 + 59 + 7 first-attempt corrects, plus 16 + 13 + 7 correct correction attempts.
+    expect(totalCorrect).toBe(67 + 72 + 14)
+
+    const summary = sheetByName(sheets, 'Session Summary')
+    const derived = summary[0].map(String).indexOf('Percent Correct (derived)')
+    expect(summary.slice(1).map((r) => r[derived] as number)).toEqual(
+      [(67 / 99) * 100, (72 / 86) * 100, (14 / 31) * 100].map((v) => expect.closeTo(v, 6)),
+    )
+  })
+
+  it('counts correction trials in Session Summary whatever the setting', async () => {
+    for (const include of [false, true]) {
+      const rows = sheetByName(await roundTrip(include), 'Session Summary')
+      const col = rows[0].map(String).indexOf('Correction Trials')
+      // The playground's Correction Trials measure reports the same 31, 14 and 17.
+      expect(rows.slice(1).map((r) => r[col])).toEqual([31, 14, 17])
     }
   })
 

@@ -3,6 +3,11 @@ import type { AnalysisRow, CellValue } from './rows'
 
 export type BinMode = 'equal-width' | 'equal-count' | 'custom'
 
+export const BIN_MODES: BinMode[] = ['equal-width', 'equal-count', 'custom']
+/** Range allowed for `binCount`, enforced by the editor and on presets read from a link. */
+export const BIN_COUNT_MIN = 2
+export const BIN_COUNT_MAX = 12
+
 export interface BinSpec {
   /** Variable key being cut into ranges. */
   variableKey: string

@@ -46,6 +46,10 @@ export interface ChartSpec {
   yLabel: string
 }
 
+/** Range allowed for `histogramBins`, enforced by the editor and on presets read from a link. */
+export const HISTOGRAM_BINS_MIN = 5
+export const HISTOGRAM_BINS_MAX = 100
+
 export function defaultSpec(): ChartSpec {
   return {
     type: 'summary',
@@ -102,7 +106,7 @@ export function availableChartTypes(
       type: 'histogram',
       label: CHART_LABELS.histogram,
       hint: hasGrouping
-        ? 'The shape of the distribution, one panel per group.'
+        ? 'The shape of the distribution, with the groups overlaid.'
         : 'The shape of the distribution.',
     })
   }

@@ -151,6 +151,25 @@ describe('correction trials', () => {
     expect(ours).toBeCloseTo(percentCorrect as number, 2)
   })
 
+  it.each(FIXTURE_PAIRS)('scores every attempt by the response actually made in $xml', ({ xml }) => {
+    const session = parseSession(xml, readFixture(xml))
+    // A correct-image touch is the ground truth for "correct" on any attempt; ABET's
+    // No. Correct only agrees with it on first attempts.
+    for (const t of session.trials) {
+      const touchedCorrect =
+        t.values['Trial Analysis - Correct Image Response Latency_Duration'] !== null
+      expect(t.correct).toBe(touchedCorrect ? 1 : 0)
+    }
+  })
+
+  it('counts the correction attempt that finally succeeds as correct', () => {
+    const session = parseSession('example-input_1.xml', readFixture('example-input_1.xml'))
+    const trial2 = session.trials.filter((t) => t.trialNo === 2)
+    // Wrong three times, then right. ABET's No. Correct reads 0 on all four attempts.
+    expect(trial2.map((t) => t.correct)).toEqual([0, 0, 0, 1])
+    expect(trial2.map((t) => t.values['Trial Analysis - No. Correct'])).toEqual([0, 0, 0, 0])
+  })
+
   it('numbers repeat attempts in order', () => {
     const session = parseSession('example-input_1.xml', readFixture('example-input_1.xml'))
     const trial2 = session.trials.filter((t) => t.trialNo === 2)
@@ -159,6 +178,66 @@ describe('correction trials', () => {
     // 99 attempts across 68 distinct trials.
     expect(session.trials).toHaveLength(99)
     expect(new Set(session.trials.map((t) => t.trialNo)).size).toBe(68)
+  })
+})
+
+/**
+ * A real export cut down to its first `k` trials, standing in for a session the rat
+ * abandoned early. Index-aligned trial markers keep their first `k` entries; timed
+ * events are kept if they fired before trial `k` ended.
+ */
+function truncateToTrials(xml: string, k: number): string {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml')
+  const markers = [...doc.querySelectorAll('MarkerData > Marker')]
+  const nameOf = (m: Element) => m.querySelector('Name')?.textContent ?? ''
+  const ends = markers
+    .filter((m) => nameOf(m) === 'Trial Analysis - Condition')
+    .map((m) => Number(m.querySelector('Results')?.textContent))
+  const lastEndMicros = ends[k - 1] * 1e6
+
+  const seen = new Map<string, number>()
+  for (const m of markers) {
+    const name = nameOf(m)
+    if (!name.startsWith('Trial Analysis - ')) continue
+    const time = m.querySelector('Time')?.textContent
+    const count = seen.get(name) ?? 0
+    seen.set(name, count + 1)
+    const keep = time != null ? Number(time) <= lastEndMicros : count < k
+    if (!keep) m.remove()
+  }
+  return new XMLSerializer().serializeToString(doc)
+}
+
+describe('short sessions', () => {
+  const full = parseSession('example-input_1.xml', readFixture('example-input_1.xml'))
+
+  it('parses a one-trial session as one trial, not as session summary values', () => {
+    const xml = truncateToTrials(readFixture('example-input_1.xml'), 1)
+    const session = parseSession('one-trial.xml', xml)
+
+    // With one trial, every block emits each marker once, so series length alone cannot
+    // pick out the trial block. This used to yield zero trials.
+    expect(session.trials).toHaveLength(1)
+    expect(session.endSummaryOrder.every((n) => n.startsWith('End Summary - '))).toBe(true)
+    // Trial 1 was correct, so the file holds no incorrect-image events and that marker's
+    // columns are absent altogether; every other trial column is present.
+    expect(session.trialColumnOrder).toEqual(
+      full.trialColumnOrder.filter((c) => !c.startsWith('Trial Analysis - Incorrect Image Latency')),
+    )
+
+    const [trial] = session.trials
+    expect(trial.trialNo).toBe(1)
+    expect(trial.correct).toBe(1)
+    expect(trial.values['Trial Analysis - Reward Collection Latency_Duration']).toBe(1.633)
+    expect(trial.values['Trial Analysis - Correct Image Response Latency_Duration']).toBe(14.954)
+    expect(session.alignmentWarnings).toEqual([])
+  })
+
+  it('parses a truncated multi-trial session the same as the full one', () => {
+    // Checks the truncation itself: the first five trials must match the full parse.
+    const xml = truncateToTrials(readFixture('example-input_1.xml'), 5)
+    const session = parseSession('five-trials.xml', xml)
+    expect(session.trials).toEqual(full.trials.slice(0, 5))
   })
 })
 

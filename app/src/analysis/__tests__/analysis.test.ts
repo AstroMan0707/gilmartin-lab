@@ -9,12 +9,24 @@ import type { Dataset } from '../../types'
 import { buildRegistry } from '../../variables/registry'
 import { aggregate, collapseToUnit, describe as describeStats, groupBy } from '../aggregate'
 import { applyBins, binLabelOrder, binnedKey, computeBins, defaultBinSpec } from '../binning'
+import { emptyValueWarning } from '../emptyValues'
 import { buildSessionRows, buildTrialRows } from '../rows'
 
-async function loadDataset(): Promise<Dataset> {
+/**
+ * The three fixture sessions joined to Rat Info. `animalIds`, if given, overwrites each
+ * file's Animal ID before parsing — the fixtures hold one session per rat, so this is how
+ * a test gets two files for the same rat, or files that record no ID.
+ */
+async function loadDataset(animalIds?: string[]): Promise<Dataset> {
   const buf = readFileSync(join(FIXTURE_DIR, 'Rat Info.xlsx'))
   const { subjects } = await parseRatInfo(new Blob([new Uint8Array(buf)]))
-  const parsed = FIXTURE_PAIRS.map((p) => parseSession(p.xml, readFixture(p.xml)))
+  const parsed = FIXTURE_PAIRS.map((p, i) => {
+    let xml = readFixture(p.xml)
+    if (animalIds) {
+      xml = xml.replace(/(<Name>Animal ID<\/Name>\s*<Value>)[^<]*/, `$1${animalIds[i]}`)
+    }
+    return parseSession(p.xml, xml)
+  })
   const { sessions, warnings } = joinMetadata(parsed, subjects)
   return {
     sessions,
@@ -146,6 +158,27 @@ describe('row building', () => {
     expect(counts.every((c) => c > 1)).toBe(true)
   })
 
+  it('scores correct correction trials as correct when they are included', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+    const rows = buildSessionRows(dataset, registry, { includeCorrectionTrials: true })
+
+    // First-attempt corrects (51, 59, 7) plus the correction attempts the rat got right
+    // (16, 13, 7). Reading ABET's No. Correct, which is 0 on every correction attempt,
+    // gave 51/99, 59/86 and 7/31 instead.
+    expect(rows.map((r) => r.values.correctTrials)).toEqual([67, 72, 14])
+    expect(rows.map((r) => r.values.percentCorrect as number)).toEqual([
+      (67 / 99) * 100,
+      (72 / 86) * 100,
+      (14 / 31) * 100,
+    ])
+
+    // Trial rows must agree with session rows under the same setting.
+    const trialRows = buildTrialRows(dataset, registry, { includeCorrectionTrials: true })
+    const correctOnTrialRows = trialRows.reduce((n, r) => n + (r.values.correctTrials as number), 0)
+    expect(correctOnTrialRows).toBe(67 + 72 + 14)
+  })
+
   it('keeps counting correction trials when they are excluded from analysis', async () => {
     const dataset = await loadDataset()
     const registry = buildRegistry(dataset)
@@ -177,12 +210,102 @@ describe('descriptive statistics', () => {
     expect(stats.mean).toBe(3)
   })
 
+  it('uses the sample SD, with an n − 1 denominator', () => {
+    // Worked by hand: mean 2.5, squared deviations sum to 5, so SD = √(5/3) and
+    // SEM = SD/√4. The population form, √(5/4) = 1.118, understates both.
+    const stats = describeStats([1, 2, 3, 4])
+    expect(stats.sd).toBeCloseTo(Math.sqrt(5 / 3), 12)
+    expect(stats.sem).toBeCloseTo(Math.sqrt(5 / 3) / 2, 12)
+
+    // n = 2: SD is |a − b| / √2.
+    expect(describeStats([10, 20]).sd).toBeCloseTo(10 / Math.SQRT2, 12)
+  })
+
   it('reports no error bar for a single observation', () => {
     // An SEM of 0 would draw a zero-length error bar, implying certainty from one rat.
     const stats = describeStats([5])
     expect(stats.n).toBe(1)
     expect(stats.sd).toBeNull()
     expect(stats.sem).toBeNull()
+  })
+})
+
+describe('empty-value report', () => {
+  /** "Label (count)" pairs and the stated total, read back out of the message. */
+  function parse(message: string) {
+    const total = Number(/^(\d+) empty value/.exec(message)?.[1])
+    const columns = Object.fromEntries(
+      [...message.matchAll(/([A-Z][\w ]*?) \((\d+)\)/g)].map((m) => [m[1], Number(m[2])]),
+    )
+    return { total, columns }
+  }
+
+  it('counts the empty cells in each column of the trial data', async () => {
+    const dataset = await loadDataset()
+    const warning = emptyValueWarning(dataset, buildRegistry(dataset))
+    expect(warning?.kind).toBe('empty-values')
+
+    // 216 attempts, 153 of them correct and rewarded: the reward and correct-response
+    // latencies are empty on the 63 errors, the incorrect-response latency on the 153.
+    const { total, columns } = parse(warning!.message)
+    expect(columns).toEqual({
+      'Reward Collection Latency': 216 - 153,
+      'Correct Response Latency': 216 - 153,
+      'Incorrect Response Latency': 153,
+    })
+    expect(total).toBe(63 + 63 + 153)
+    expect(warning!.message).toContain('over 216 trial attempts')
+  })
+
+  it('flags metadata a rat is missing, not only latencies', async () => {
+    // LZ041's session relabelled to a rat Rat Info has never heard of: 86 attempts with no
+    // genotype and no set.
+    const dataset = await loadDataset(['LZ039', 'ZZ999', 'LZ122'])
+    const { total, columns } = parse(emptyValueWarning(dataset, buildRegistry(dataset))!.message)
+    expect(columns.Genotype).toBe(86)
+    expect(columns.Set).toBe(86)
+    expect(total).toBe(Object.values(columns).reduce((a, b) => a + b, 0))
+  })
+})
+
+describe('missing data points', () => {
+  /*
+   * Reward latencies for three rats:
+   *   A: session 0 [2, —, 4], session 1 [—, 6]
+   *   B: session 2 [—, —]         never collected a reward
+   *   C: session 3 [3], session 4 [—]
+   */
+  const trial = (sessionIndex: number, subject: string, rewardLatency: number | null) => ({
+    sessionIndex,
+    values: { __sessionIndex: sessionIndex, __subjectKey: subject, rewardLatency },
+  })
+  const rows = [
+    trial(0, 'A', 2), trial(0, 'A', null), trial(0, 'A', 4),
+    trial(1, 'A', null), trial(1, 'A', 6),
+    trial(2, 'B', null), trial(2, 'B', null),
+    trial(3, 'C', 3),
+    trial(4, 'C', null),
+  ]
+
+  it.each([
+    // unit, n, missing — n + missing is always every data point of that kind.
+    ['trial', 4, 5],
+    ['session', 3, 2],
+    ['subject', 2, 1],
+  ] as const)('counts %s-level data points with no value as missing', async (unit, n, missing) => {
+    // Missing used to read 0 for sessions and rats, and rat B vanished from n uncounted.
+    const registry = buildRegistry(await loadDataset())
+    const [cell] = aggregate(rows, 'rewardLatency', [], unit, registry)
+    expect(cell.stats.n).toBe(n)
+    expect(cell.stats.missing).toBe(missing)
+  })
+
+  it('leaves the missing rat out of the mean rather than counting it as zero', async () => {
+    const registry = buildRegistry(await loadDataset())
+    const [cell] = aggregate(rows, 'rewardLatency', [], 'subject', registry)
+    // A is the mean of its session means (3 and 6); C's empty session does not count.
+    expect(cell.stats.values.sort()).toEqual([3, 4.5])
+    expect(cell.stats.mean).toBe(3.75)
   })
 })
 
@@ -198,6 +321,28 @@ describe('aggregation unit', () => {
     // This is the pseudo-replication guard: three rats must give n = 3, not n = 150+.
     expect(bySubject[0].stats.n).toBe(3)
     expect(byTrial[0].stats.n).toBeGreaterThan(100)
+  })
+
+  it('counts one rat once, however its ID is spelled', async () => {
+    // The Rat Info join and session numbering already treat these as one rat; "Each rat"
+    // used to see two, inflating n.
+    const dataset = await loadDataset(['LZ039', 'lz 039', 'LZ122'])
+    const registry = buildRegistry(dataset)
+    const rows = buildTrialRows(dataset, registry, { includeCorrectionTrials: true })
+
+    expect(aggregate(rows, 'correctImageLatency', [], 'subject', registry)[0].stats.n).toBe(2)
+    expect(groupBy(rows, ['animalId'], registry).map((g) => g.label)).toEqual(['LZ039', 'LZ122'])
+  })
+
+  it('treats each session without an ID as its own rat', async () => {
+    // Two ID-less files are not evidence of one rat. They used to share an empty ID and
+    // collapse into a single data point.
+    const dataset = await loadDataset(['', '', 'LZ122'])
+    const registry = buildRegistry(dataset)
+    const rows = buildSessionRows(dataset, registry, { includeCorrectionTrials: false })
+
+    expect(aggregate(rows, 'percentCorrect', [], 'subject', registry)[0].stats.n).toBe(3)
+    expect(rows.map((r) => r.values.animalId)).toEqual([null, null, 'LZ122'])
   })
 
   it('averages within a rat before comparing groups', async () => {
@@ -260,7 +405,7 @@ describe('aggregation unit', () => {
     const registry = buildRegistry(dataset)
     // Two sessions attributed to the same rat, so collapsing has something to do.
     const rows = buildSessionRows(dataset, registry, { includeCorrectionTrials: false }).slice(0, 2)
-    for (const r of rows) r.values.animalId = 'SAME'
+    for (const r of rows) r.values.__subjectKey = 'SAME'
 
     const count = aggregate(rows, 'correctTrials', [], 'subject', registry)[0]
     const rate = aggregate(rows, 'percentCorrect', [], 'subject', registry)[0]
@@ -510,9 +655,10 @@ describe('touch counters', () => {
 
     expect(aggregate(rows, 'percentCorrect', [], 'subject', registry)[0].stats.total).toBeNull()
     expect(aggregate(rows, 'rewardLatency', [], 'subject', registry)[0].stats.total).toBeNull()
-    // Counts do report one.
+    // Counts do report one. Correction trials are included, so the correction attempts the
+    // rats got right (16 + 13 + 7) count alongside the first-attempt corrects.
     expect(aggregate(rows, 'correctTrials', [], 'subject', registry)[0].stats.total).toBe(
-      51 + 59 + 7,
+      51 + 59 + 7 + 16 + 13 + 7,
     )
   })
 })

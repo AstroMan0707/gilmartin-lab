@@ -3,7 +3,7 @@ import { Notice } from '../components/Notice'
 import { buildWorkbook, workbookFileName } from '../export/workbook'
 import { downloadBlob } from '../export/figureOptions'
 import { useAppStore } from '../store/useAppStore'
-import { axisTitle } from '../variables/registry'
+import { axisTitle, dataTableKeys } from '../variables/registry'
 
 type Level = 'trial' | 'session'
 
@@ -24,13 +24,7 @@ export function DataTableTab() {
   // charts, with identity fields first.
   const columns = useMemo(() => {
     if (!registry) return []
-    const identity = ['animalId', 'genotype', 'sex', 'set', 'sessionNumber', 'delaySec', 'testDay']
-    const rest = registry.variables
-      .filter((v) => !identity.includes(v.key))
-      .filter((v) => (level === 'trial' ? v.level !== 'session' : v.level !== 'trial' || true))
-      .map((v) => v.key)
-    const keys = [...identity, ...rest].filter((k) => registry.byKey.has(k))
-    return keys.map((k) => ({ key: k, def: registry.byKey.get(k)! }))
+    return dataTableKeys(registry, level).map((k) => ({ key: k, def: registry.byKey.get(k)! }))
   }, [registry, level])
 
   const filtered = useMemo(() => {

@@ -1,12 +1,15 @@
 import { create } from 'zustand'
+import { emptyValueWarning } from '../analysis/emptyValues'
 import { buildSessionRows, buildTrialRows, type AnalysisRow } from '../analysis/rows'
 import { defaultSpec, type ChartSpec } from '../charts/spec'
 import type { ThemeMode } from '../charts/theme'
 import { defaultExportOptions, type FigureExportOptions } from '../export/figureOptions'
-import { loadFiles, type LoadInput, type LoadProgress } from '../loadFiles'
+import { loadFiles, mergeFiles, type LoadInput, type LoadProgress } from '../loadFiles'
 import {
+  checkPreset,
   deletePreset as removePreset,
   listPresets,
+  missingVariables,
   savePreset as writePreset,
   type AnalysisPreset,
 } from '../presets'
@@ -14,6 +17,15 @@ import type { Dataset } from '../types'
 import { buildRegistry, type Registry } from '../variables/registry'
 
 export type TabId = 'load' | 'table' | 'playground'
+
+/** What opening a preset did, for the notice shown after it, whichever way it was opened. */
+export interface AppliedPreset {
+  name: string
+  /** Variables it uses that the loaded data lacks. */
+  missing: string[]
+  /** The correction-trial setting it switched to, if it changed it; otherwise null. */
+  correctionTrialsNow: boolean | null
+}
 
 interface AppState {
   // --- Data ---------------------------------------------------------------------------
@@ -23,6 +35,14 @@ interface AppState {
   loading: boolean
   progress: LoadProgress | null
   loadError: string | null
+  /**
+   * Every file chosen on the Load tab, loaded or not. Held here rather than in the tab so it
+   * survives switching tabs: each load builds the dataset from this whole list, so adding
+   * files after a load loads them alongside the others instead of replacing them.
+   */
+  files: LoadInput
+  /** The list the current dataset was built from, to tell loaded files from new ones. */
+  loadedFrom: LoadInput | null
 
   // --- Settings that change what the numbers mean --------------------------------------
   /**
@@ -45,9 +65,16 @@ interface AppState {
    * once files arrive, instead of being discarded by the fresh-load reset.
    */
   pendingPreset: AnalysisPreset | null
+  /** The preset most recently opened, from the saved list or a shared link. */
+  appliedPreset: AppliedPreset | null
 
   // --- Actions -------------------------------------------------------------------------
-  load(input: LoadInput): Promise<void>
+  /** Adds picked files to the list; returns any that are neither .xml nor .xlsx. */
+  addFiles(files: File[]): File[]
+  removeXmlFile(index: number): void
+  removeRatInfoFile(): void
+  /** Builds the dataset from every file in the list. */
+  load(): Promise<void>
   clear(): void
   setTab(tab: TabId): void
   setTheme(theme: ThemeMode): void
@@ -64,6 +91,19 @@ interface AppState {
   trialRows(): AnalysisRow[]
   /** Rows at session level, honouring the correction-trial setting. */
   sessionRows(): AnalysisRow[]
+}
+
+function describeApplied(
+  preset: AnalysisPreset,
+  registry: Registry | null,
+  correctionTrialsBefore: boolean,
+): AppliedPreset {
+  return {
+    name: preset.name,
+    missing: checkPreset(preset, registry).missing,
+    correctionTrialsNow:
+      preset.includeCorrectionTrials === correctionTrialsBefore ? null : preset.includeCorrectionTrials,
+  }
 }
 
 /**
@@ -84,6 +124,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: false,
   progress: null,
   loadError: null,
+  files: { xmlFiles: [], ratInfoFile: null },
+  loadedFrom: null,
   includeCorrectionTrials: false,
   tab: 'load',
   theme: 'light',
@@ -91,25 +133,55 @@ export const useAppStore = create<AppState>((set, get) => ({
   exportOptions: defaultExportOptions(),
   presets: listPresets(),
   pendingPreset: null,
+  appliedPreset: null,
 
-  async load(input) {
+  addFiles(incoming) {
+    const { files, ignored } = mergeFiles(get().files, incoming)
+    set({ files })
+    return ignored
+  },
+
+  removeXmlFile(index) {
+    const { files } = get()
+    set({ files: { ...files, xmlFiles: files.xmlFiles.filter((_, i) => i !== index) } })
+  },
+
+  removeRatInfoFile() {
+    set({ files: { ...get().files, ratInfoFile: null } })
+  },
+
+  async load() {
+    const files = get().files
     set({ loading: true, loadError: null, progress: null })
     try {
-      const dataset = await loadFiles(input, (progress) => set({ progress }))
+      const loaded = await loadFiles(files, (progress) => set({ progress }))
+      const registry = buildRegistry(loaded)
+      const emptyValues = emptyValueWarning(loaded, registry)
+      const dataset = emptyValues ? { ...loaded, warnings: [...loaded.warnings, emptyValues] } : loaded
       rowCache = null
       const pending = get().pendingPreset
+      // Loading again after adding or removing files keeps the chart already built, as long as
+      // everything it plots still exists in the new data. A first load, or one that loses a
+      // variable the chart uses, starts from the defaults.
+      const current = get().dataset ? get().spec : null
+      const keepSpec = current !== null && missingVariables(current, registry).length === 0
       set({
         dataset,
-        registry: buildRegistry(dataset),
+        registry,
+        loadedFrom: files,
         loading: false,
         progress: null,
-        // A fresh load invalidates any previous selection, since the variables may differ —
-        // unless a shared preset is waiting, which is the whole point of opening such a link.
-        spec: pending ? pending.spec : defaultSpec(),
+        // A shared preset waiting to be applied wins, which is the whole point of opening
+        // such a link.
+        spec: pending ? pending.spec : keepSpec ? current : defaultSpec(),
         includeCorrectionTrials: pending
           ? pending.includeCorrectionTrials
           : get().includeCorrectionTrials,
         pendingPreset: null,
+        // A link opened before any data is applied here, so it gets the same notice as one
+        // opened from the saved list: which variables it lacks, and whether it changed the
+        // correction-trial setting.
+        appliedPreset: pending ? describeApplied(pending, registry, get().includeCorrectionTrials) : null,
         tab: 'playground',
       })
     } catch (error) {
@@ -126,6 +198,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       dataset: null,
       registry: null,
+      files: { xmlFiles: [], ratInfoFile: null },
+      loadedFrom: null,
+      appliedPreset: null,
       loadError: null,
       progress: null,
       spec: defaultSpec(),
@@ -160,9 +235,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   applyPreset(preset) {
     rowCache = null
+    const { registry, includeCorrectionTrials } = get()
     set({
       spec: preset.spec,
       includeCorrectionTrials: preset.includeCorrectionTrials,
+      appliedPreset: describeApplied(preset, registry, includeCorrectionTrials),
       tab: 'playground',
     })
   },

@@ -1,4 +1,5 @@
 import Plotly from 'plotly.js-dist-min'
+import type { Figure } from '../charts/buildFigure'
 import { CSS_PPI, plotlyScaleFor, type FigureExportOptions } from './figureOptions'
 import { setPngDpi } from './pngDpi'
 
@@ -27,16 +28,21 @@ function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
  *
  * The PNG then gets a `pHYs` chunk so it reports the requested DPI to page-layout software
  * instead of defaulting to 96.
+ *
+ * Renders from a figure object rather than the graph on screen, so the caller can hand it a
+ * figure built for print: the on-screen one follows the app's theme, and exporting it in dark
+ * mode produced a figure with a near-black background and white text.
  */
 export async function exportFigure(
-  graphDiv: HTMLElement,
+  figure: Pick<Figure, 'data' | 'layout'>,
   opts: FigureExportOptions,
 ): Promise<Blob> {
   const layoutWidth = Math.round(opts.widthIn * CSS_PPI)
   const layoutHeight = Math.round(opts.heightIn * CSS_PPI)
+  const source = { data: figure.data, layout: figure.layout } as Parameters<typeof Plotly.toImage>[0]
 
   if (opts.format === 'svg') {
-    const dataUrl = await Plotly.toImage(graphDiv, {
+    const dataUrl = await Plotly.toImage(source, {
       format: 'svg',
       width: layoutWidth,
       height: layoutHeight,
@@ -46,7 +52,7 @@ export async function exportFigure(
     return new Blob([svgText], { type: 'image/svg+xml' })
   }
 
-  const dataUrl = await Plotly.toImage(graphDiv, {
+  const dataUrl = await Plotly.toImage(source, {
     format: 'png',
     width: layoutWidth,
     height: layoutHeight,

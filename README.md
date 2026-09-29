@@ -34,7 +34,7 @@ spreadsheet — without anyone needing to write code.
 3. Press **Load**. Read the panel that appears: it says what came through and flags anything that
    needs a look.
 4. Go to **Visualisation playground**, click **Percent Correct**, then click **Genotype** (or any
-   other grouping) and pick a chart type on the right.
+   other grouping) and pick a chart type from the row above the figure.
 5. Export the figure, or switch to **Data & Excel export** for the whole dataset.
 
 Stuck on step 4? The chart types you cannot use stay greyed out and say why.
@@ -102,6 +102,11 @@ came through, which groups and conditions were found, and any of the following:
 
 None of these block you. They exist so a surprise in a figure has an explanation.
 
+To add files later, drop them in and press Load again: the dataset is rebuilt from every file in
+the list, and files not yet loaded are marked *new*. Removing a file from the list and pressing
+Load takes it out. The chart you had set up in the playground is kept, as long as the new data
+still has every variable it uses.
+
 ### 2. Visualisation playground
 
 Click a **measure** on the left to activate it. Click more than one to get a panel each. Then
@@ -140,14 +145,20 @@ These are the places where a reasonable-looking number can mislead.
 - **Correction trials are excluded by default.** ABET repeats a trial after an error, keeping the
   same trial number, so one trial can appear several times. Leaving the repeats out makes accuracy
   match the figure ABET itself reports. The toggle is under *Options*, and it applies to the
-  figures and the Excel export together — so they always describe the same trials.
+  figures and the Excel export together — so they always describe the same trials. When repeats
+  are included, each one is scored by the image the rat actually touched: ABET's own
+  `No. Correct` is 0 on every repeat, even a correct one, so the exported Trial Data sheet adds a
+  *Correct* column that scores every attempt.
 - **"Each point is" changes what n means.** It defaults to *Each rat*, averaging within each
-  subject before groups are compared. Switching to *Each trial* makes n the number of trials,
+  subject before groups are compared: first within each session, then across the rat's sessions,
+  so every session counts equally however many trials it had. Switching to *Each trial* makes n the number of trials,
   which inflates it by orders of magnitude and will make almost any difference look large. That is
   rarely what you want for a group comparison.
 - **Missing is not zero.** A trial where no reward was collected has no reward latency. Such
   trials are left out of averages rather than counted as zero seconds, and the count is reported
-  in the *Missing* column.
+  in the *Missing* column. Missing counts the same kind of data point as n, so with *Each rat* it
+  is the rats that have no value at all; n plus Missing is always every rat, session or trial in
+  the group.
 - **n, Total and Mean answer different questions.** *n* is the number of data points — subjects,
   sessions or trials, whichever you chose. *Total* is how many altogether. *Mean* is how many
   each. Total appears only for counts, because summing percentages or latencies has no meaning.
@@ -293,6 +304,8 @@ Useful if you are extending the parser or adapting it to another schedule.
   rather than being dropped.
 - **Subject info** is joined on the identifier with whitespace removed and capitalisation ignored,
   because the two sources routinely disagree on formatting — sometimes inconsistently within a
-  single file. Dates stored as bare spreadsheet serial numbers are converted. Where both sources
-  record the same field the session file wins, and any disagreement is reported rather than
-  silently resolved.
+  single file. Dates stored as bare spreadsheet serial numbers are converted. Sex is the one field
+  both sources record, and the subject-info sheet wins: sex belongs to the rat, while the session
+  file's Sex is typed per session and can vary between a rat's sessions, which would put one rat in
+  both groups. The session file fills in only for a rat the sheet has no sex for, and only if all
+  of that rat's sessions agree. Any disagreement is reported rather than silently resolved.

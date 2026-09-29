@@ -1,4 +1,13 @@
-import { defaultSpec, type ChartSpec } from './charts/spec'
+import { AGGREGATION_LABELS, type AggregationUnit } from './analysis/aggregate'
+import { BIN_COUNT_MAX, BIN_COUNT_MIN, BIN_MODES, type BinSpec } from './analysis/binning'
+import {
+  CHART_LABELS,
+  defaultSpec,
+  HISTOGRAM_BINS_MAX,
+  HISTOGRAM_BINS_MIN,
+  type ChartSpec,
+  type ChartType,
+} from './charts/spec'
 import type { Registry } from './variables/registry'
 
 /**
@@ -44,25 +53,93 @@ export function presetsAvailable(): boolean {
   return storage() !== null
 }
 
+/*
+ * A preset read from a link or from storage is untrusted: anyone can hand-edit a link, and an
+ * older version of the app may have written the entry. Every field is checked against what the
+ * app itself could have produced, and anything else falls back to its default, because a
+ * malformed value used to reach the chart code and throw during render, blanking the app, or
+ * (a bin count of millions) freeze the tab.
+ */
+
+/** Generous caps: well above anything the UI produces, far below anything that hurts. */
+const MAX_MEASURES = 50
+const MAX_BIN_SPECS = 50
+const MAX_EDGES = 100
+const MAX_TEXT = 200
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback
+}
+
+function intInRange(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return Math.max(min, Math.min(max, Math.round(value)))
+}
+
+function text(value: unknown): string {
+  return typeof value === 'string' ? value.slice(0, MAX_TEXT) : ''
+}
+
+function optionalKey(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value.slice(0, MAX_TEXT) : null
+}
+
+/**
+ * One bin spec, or null if it is not an object. Always keyed by the variable it sits under,
+ * so a spec cannot bin one variable while being labelled as another.
+ */
+function sanitiseBinSpec(variableKey: string, raw: unknown): BinSpec | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const r = raw as Partial<BinSpec>
+  const edges = Array.isArray(r.edges)
+    ? r.edges.filter((e): e is number => typeof e === 'number' && Number.isFinite(e)).slice(0, MAX_EDGES)
+    : []
+  const spec: BinSpec = {
+    variableKey,
+    mode: oneOf(r.mode, BIN_MODES, 'equal-count'),
+    binCount: intInRange(r.binCount, BIN_COUNT_MIN, BIN_COUNT_MAX, 4),
+    edges,
+  }
+  if (Array.isArray(r.labels)) {
+    spec.labels = r.labels
+      .slice(0, MAX_EDGES + 1)
+      .map((l) => (typeof l === 'string' ? l.slice(0, MAX_TEXT) : null))
+  }
+  return spec
+}
+
+function sanitiseBins(raw: unknown): Record<string, BinSpec> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  const out: Record<string, BinSpec> = {}
+  for (const [key, value] of Object.entries(raw).slice(0, MAX_BIN_SPECS)) {
+    const spec = sanitiseBinSpec(key, value)
+    if (spec) out[key] = spec
+  }
+  return out
+}
+
 /** Only the fields that describe the analysis; anything else is ignored on read. */
-function sanitiseSpec(raw: unknown): ChartSpec {
+export function sanitiseSpec(raw: unknown): ChartSpec {
   const base = defaultSpec()
   if (typeof raw !== 'object' || raw === null) return base
-  const r = raw as Partial<ChartSpec>
+  const r = raw as Record<string, unknown>
+  const measureKeys = Array.isArray(r.measureKeys)
+    ? [...new Set(r.measureKeys.filter((k): k is string => typeof k === 'string' && k !== ''))]
+        .slice(0, MAX_MEASURES)
+    : []
   return {
-    ...base,
-    type: r.type ?? base.type,
-    measureKeys: Array.isArray(r.measureKeys) ? r.measureKeys.filter((k) => typeof k === 'string') : [],
-    xKey: typeof r.xKey === 'string' ? r.xKey : null,
-    seriesKey: typeof r.seriesKey === 'string' ? r.seriesKey : null,
-    unit: r.unit ?? base.unit,
-    bins: typeof r.bins === 'object' && r.bins !== null ? r.bins : {},
-    histogramBins: typeof r.histogramBins === 'number' ? r.histogramBins : base.histogramBins,
-    showErrorBars: r.showErrorBars ?? base.showErrorBars,
-    showValues: r.showValues ?? base.showValues,
-    title: typeof r.title === 'string' ? r.title : '',
-    xLabel: typeof r.xLabel === 'string' ? r.xLabel : '',
-    yLabel: typeof r.yLabel === 'string' ? r.yLabel : '',
+    type: oneOf(r.type, Object.keys(CHART_LABELS) as ChartType[], base.type),
+    measureKeys,
+    xKey: optionalKey(r.xKey),
+    seriesKey: optionalKey(r.seriesKey),
+    unit: oneOf(r.unit, Object.keys(AGGREGATION_LABELS) as AggregationUnit[], base.unit),
+    bins: sanitiseBins(r.bins),
+    histogramBins: intInRange(r.histogramBins, HISTOGRAM_BINS_MIN, HISTOGRAM_BINS_MAX, base.histogramBins),
+    showErrorBars: typeof r.showErrorBars === 'boolean' ? r.showErrorBars : base.showErrorBars,
+    showValues: typeof r.showValues === 'boolean' ? r.showValues : base.showValues,
+    title: text(r.title),
+    xLabel: text(r.xLabel),
+    yLabel: text(r.yLabel),
   }
 }
 
@@ -201,18 +278,19 @@ export interface PresetCheck {
  */
 export function checkPreset(preset: AnalysisPreset, registry: Registry | null): PresetCheck {
   if (!registry) return { missing: [], ok: true }
-  const needed = [
-    ...preset.spec.measureKeys,
-    preset.spec.xKey,
-    preset.spec.seriesKey,
-  ].filter((k): k is string => typeof k === 'string' && k !== '')
+  const missing = missingVariables(preset.spec, registry)
+  return { missing, ok: missing.length === 0 }
+}
 
-  const missing = needed
+/** Variable keys a chart spec plots or groups by that the registry does not provide. */
+export function missingVariables(spec: ChartSpec, registry: Registry): string[] {
+  const needed = [...spec.measureKeys, spec.xKey, spec.seriesKey].filter(
+    (k): k is string => typeof k === 'string' && k !== '',
+  )
+  return needed
     .map((k) => k.replace(/__bin$/, ''))
     .filter((k, i, all) => all.indexOf(k) === i)
     .filter((k) => !registry.byKey.has(k))
-
-  return { missing, ok: missing.length === 0 }
 }
 
 /** Human-readable summary of what a preset will plot, for the saved list. */

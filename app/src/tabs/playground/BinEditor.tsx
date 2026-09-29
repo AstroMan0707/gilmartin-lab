@@ -1,4 +1,10 @@
-import { computeBins, type BinMode, type BinSpec } from '../../analysis/binning'
+import {
+  BIN_COUNT_MAX,
+  BIN_COUNT_MIN,
+  computeBins,
+  type BinMode,
+  type BinSpec,
+} from '../../analysis/binning'
 import type { AnalysisRow } from '../../analysis/rows'
 import { effectiveUnit } from '../../analysis/aggregate'
 import { useAppStore } from '../../store/useAppStore'
@@ -148,11 +154,16 @@ export function BinEditor({
             Number of ranges
             <input
               type="number"
-              min={2}
-              max={12}
+              min={BIN_COUNT_MIN}
+              max={BIN_COUNT_MAX}
               value={binSpec.binCount}
               onChange={(e) =>
-                update({ binCount: Math.max(2, Math.min(12, Number(e.target.value) || 2)) })
+                update({
+                  binCount: Math.max(
+                    BIN_COUNT_MIN,
+                    Math.min(BIN_COUNT_MAX, Number(e.target.value) || BIN_COUNT_MIN),
+                  ),
+                })
               }
             />
           </label>

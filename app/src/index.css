@@ -619,17 +619,18 @@ table.data td.empty {
   margin-bottom: 0.5rem;
 }
 
-.chart-type-list {
+.chart-type-bar {
   display: flex;
-  flex-direction: column;
-  gap: 0.3125rem;
+  flex-wrap: wrap;
+  gap: 0.375rem;
 }
 
 .chart-type {
   appearance: none;
   font: inherit;
-  text-align: left;
-  padding: 0.4375rem 0.625rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.3125rem 0.75rem;
   border-radius: 6px;
   border: 1px solid var(--border-strong);
   background: var(--surface-raised);
@@ -637,7 +638,7 @@ table.data td.empty {
   cursor: pointer;
 }
 
-.chart-type:hover {
+.chart-type:hover:not(:disabled) {
   border-color: var(--accent);
 }
 
@@ -646,18 +647,13 @@ table.data td.empty {
   background: var(--accent-soft);
 }
 
-.chart-type strong {
-  display: block;
-  font-size: 0.875rem;
-  font-weight: 600;
+.chart-type:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-.chart-type span {
-  display: block;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin-top: 0.0625rem;
-  white-space: normal;
+.chart-type-hint {
+  margin: 0.375rem 0 0.75rem;
 }
 
 .bin-editor {

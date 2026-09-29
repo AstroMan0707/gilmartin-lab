@@ -48,8 +48,24 @@ export function detectTrialStructure(series: Map<string, MarkerSeries>): TrialSt
     }
   }
 
+  // In a one-trial session every block emits each marker once, so series length cannot
+  // tell the trial block from the session blocks. Fall back to the block that numbers
+  // its trials; without this the lone trial was read as session-level summary values.
+  if (!trialBlock) {
+    for (const block of maxByBlock.keys()) {
+      if (series.has(`${block} - Trial No.`)) {
+        trialBlock = block
+        break
+      }
+    }
+  }
+
   const sessionBlocks = [...maxByBlock.keys()].filter((b) => b !== trialBlock)
-  return { trialBlock, sessionBlocks, trialCount: trialBlock ? best : 0 }
+  return {
+    trialBlock,
+    sessionBlocks,
+    trialCount: trialBlock ? (maxByBlock.get(trialBlock) ?? 0) : 0,
+  }
 }
 
 /**
@@ -182,9 +198,11 @@ export function buildTrials(parsed: ParsedSessionXml): BuiltTrials {
     }
   }
 
-  // --- Attempt numbering ------------------------------------------------------------
+  // --- Attempt numbering and scoring ------------------------------------------------
   const trialNoCol = `${structure.trialBlock} - Trial No.`
   const correctCol = `${structure.trialBlock} - No. Correct`
+  const correctResponseCol = `${structure.trialBlock} - Correct Image Response Latency${DURATION_SUFFIX}`
+  const hasCorrectResponse = correctResponseCol in values
   const seenTrialNo = new Map<number, number>()
 
   const trials: TrialRow[] = []
@@ -196,13 +214,27 @@ export function buildTrials(parsed: ParsedSessionXml): BuiltTrials {
     const row: Record<string, number | null> = {}
     for (const col of columnOrder) row[col] = values[col][i]
 
+    /*
+     * ABET's `No. Correct` scores first attempts only: it is 0 on every correction attempt,
+     * including the one the rat finally gets right, which is how its Percentage Correct
+     * leaves corrections out. Taken at face value it would count every correct correction
+     * as an error once correction trials are included. So first attempts keep ABET's own
+     * score, and correction attempts are scored by whether the correct image was touched —
+     * an event that agrees with `No. Correct` on every first attempt in the sample files.
+     */
+    const isCorrectionTrial = attemptNo > 1
+    const correct =
+      isCorrectionTrial && hasCorrectResponse
+        ? Number(values[correctResponseCol][i] !== null)
+        : (values[correctCol]?.[i] ?? 0)
+
     trials.push({
       index: i,
       trialNo,
       attemptNo,
-      isCorrectionTrial: attemptNo > 1,
+      isCorrectionTrial,
       endSec: endSec[i],
-      correct: values[correctCol]?.[i] ?? 0,
+      correct,
       values: row,
     })
   }

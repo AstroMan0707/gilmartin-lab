@@ -123,6 +123,70 @@ describe('joining sessions to subjects', () => {
     expect(warnings.find((w) => w.kind === 'unmatched-animal')?.message).toContain('ZZ999')
   })
 
+  describe('sex', () => {
+    /** LZ039's session, relabelled: Rat Info records LZ039 as female. */
+    function session(fileName: string, sexXml: 'F' | 'M' | null, animalId = 'LZ039') {
+      const s = parseSession(fileName, readFixture('example-input_1.xml'))
+      ;(s as { sexXml: 'F' | 'M' | null }).sexXml = sexXml
+      ;(s as { animalId: string }).animalId = animalId
+      ;(s as { animalIdRaw: string }).animalIdRaw = animalId
+      ;(s as { scheduleRunId: string }).scheduleRunId = fileName
+      return s
+    }
+
+    it('takes Rat Info over the session file, and says so', async () => {
+      const { subjects } = await parseRatInfo(ratInfoBlob())
+      const { sessions, warnings } = joinMetadata([session('a.xml', 'M')], subjects)
+      expect(sessions[0].sex).toBe('F')
+      expect(warnings.find((w) => w.kind === 'sex-conflict')?.message).toContain('Rat Info is used')
+    })
+
+    it('gives a rat one sex even when its session files disagree', async () => {
+      // One session typed "male" used to put LZ039 in both sex groups, counting it twice.
+      const { subjects } = await parseRatInfo(ratInfoBlob())
+      const { sessions } = joinMetadata(
+        [session('a.xml', 'F'), session('b.xml', 'M'), session('c.xml', null)],
+        subjects,
+      )
+      expect(sessions.map((s) => s.sex)).toEqual(['F', 'F', 'F'])
+    })
+
+    it('falls back to the session files for a rat Rat Info lacks, if they agree', async () => {
+      const { subjects } = await parseRatInfo(ratInfoBlob())
+      const { sessions, warnings } = joinMetadata(
+        [session('a.xml', 'M', 'ZZ999'), session('b.xml', null, 'ZZ999')],
+        subjects,
+      )
+      // The session with no Sex field takes the rat's sex from its other session.
+      expect(sessions.map((s) => s.sex)).toEqual(['M', 'M'])
+      expect(warnings.find((w) => w.kind === 'sex-conflict')).toBeUndefined()
+    })
+
+    it('leaves sex blank rather than guessing when those session files disagree', async () => {
+      const { subjects } = await parseRatInfo(ratInfoBlob())
+      const { sessions, warnings } = joinMetadata(
+        [session('a.xml', 'M', 'ZZ999'), session('b.xml', 'F', 'ZZ999')],
+        subjects,
+      )
+      expect(sessions.map((s) => s.sex)).toEqual([null, null])
+      const warning = warnings.find((w) => w.kind === 'sex-conflict')
+      expect(warning?.subjects).toEqual(['ZZ999'])
+      expect(warning?.message).toContain('disagree on the sex of ZZ999')
+    })
+  })
+
+  it('names the files that record no Animal ID, rather than quoting an empty ID', async () => {
+    const { subjects } = await parseRatInfo(ratInfoBlob())
+    const noId = parseSession('no-id.xml', readFixture('example-input_1.xml'))
+    ;(noId as { animalId: string }).animalId = ''
+    ;(noId as { animalIdRaw: string }).animalIdRaw = ''
+    const { warnings } = joinMetadata([noId], subjects)
+    const warning = warnings.find((w) => w.kind === 'unmatched-animal')
+    expect(warning?.message).toContain('record no Animal ID')
+    expect(warning?.message).toContain('no-id.xml')
+    expect(warning?.message).not.toContain('""')
+  })
+
   it('flags the same run loaded twice', async () => {
     const { subjects } = await parseRatInfo(ratInfoBlob())
     const a = parseSession('copy-a.xml', readFixture('example-input_1.xml'))
@@ -149,7 +213,10 @@ describe('derived session summary', () => {
       session.endSummary['End Summary - Percentage Correct'] as number,
       2,
     )
-    expect(summary.nCorrectionTrials).toBe(0)
+    // Counted from the whole session, so it survives the filter above; with the default
+    // setting this column used to read 0 for every session.
+    expect(summary.nCorrectionTrials).toBe(session.trials.length - firstAttempts.length)
+    expect(summary.nCorrectionTrials).toBeGreaterThan(0)
 
     // Accuracy per distance must agree with the End Summary counters, which are correct
     // counts per distance over first attempts.
