@@ -34,7 +34,7 @@ spreadsheet — without anyone needing to write code.
 3. Press **Load**. Read the panel that appears: it says what came through and flags anything that
    needs a look.
 4. Go to **Visualisation playground**, click **Percent Correct**, then click **Genotype** (or any
-   other grouping) and pick a chart type on the right.
+   other grouping) and pick a chart type from the row above the figure.
 5. Export the figure, or switch to **Data & Excel export** for the whole dataset.
 
 Stuck on step 4? The chart types you cannot use stay greyed out and say why.

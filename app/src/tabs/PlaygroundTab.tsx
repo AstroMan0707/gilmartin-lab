@@ -86,6 +86,17 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
   const chartTypes = useMemo(() => availableChartTypes(spec, registry), [spec, registry])
   const activeType: ChartType = chartTypes.some((t) => t.type === spec.type) ? spec.type : 'summary'
 
+  // Why each unusable chart type is unusable, with types that share a reason said once.
+  const unavailableChartTypes = useMemo(() => {
+    const byReason = new Map<string, ChartType[]>()
+    for (const type of ALL_CHART_TYPES) {
+      if (chartTypes.some((t) => t.type === type)) continue
+      const reason = unavailableReason(type, spec, registry)
+      if (reason) byReason.set(reason, [...(byReason.get(reason) ?? []), type])
+    }
+    return [...byReason].map(([reason, types]) => ({ reason, types }))
+  }, [chartTypes, spec, registry])
+
   const figure = useMemo(() => {
     if (spec.measureKeys.length === 0 || activeType === 'summary') return null
     return buildFigure(rows, { ...spec, type: activeType }, registry, getTheme(theme))
@@ -158,6 +169,37 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
             </div>
           ) : (
             <>
+              {/* Chart type sits with the figure it changes, so it is in view at any width —
+                  in the side rail it fell below the figure and table on a narrow screen. */}
+              <div className="chart-type-bar" role="group" aria-label="Chart type" data-testid="chart-types">
+                {ALL_CHART_TYPES.map((type) => {
+                  const available = chartTypes.find((t) => t.type === type)
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      className="chart-type"
+                      aria-pressed={activeType === type}
+                      disabled={!available}
+                      title={available ? available.hint : (unavailableReason(type, spec, registry) ?? undefined)}
+                      onClick={() => updateSpec({ type })}
+                    >
+                      {CHART_LABELS[type]}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="hint chart-type-hint">
+                {chartTypes.find((t) => t.type === activeType)?.hint}
+                {unavailableChartTypes.map(({ types, reason }) => (
+                  <span key={reason} className="muted">
+                    {' '}
+                    {types.map((t) => CHART_LABELS[t]).join(' and ')}{' '}
+                    {types.length === 1 ? 'is' : 'are'} unavailable: {reason}
+                  </span>
+                ))}
+              </p>
+
               <p className="secondary small">{AGGREGATION_DESCRIPTIONS[spec.unit]}</p>
 
               {figure?.notices.map((notice, i) => (
@@ -192,50 +234,8 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
         )}
       </div>
 
-      {/* In the order the work is done: pick a chart, adjust it, export it; presets last. */}
+      {/* In the order the work is done: adjust the chart, export it; presets last. */}
       <div className="rail">
-        <div className="card" data-testid="chart-types">
-          <div className="card-header">
-            <h3>Chart type</h3>
-          </div>
-          {!hasMeasures ? (
-            <p className="muted small">Choose a measure first.</p>
-          ) : (
-            <div className="chart-type-list">
-              {ALL_CHART_TYPES.map((type) => {
-                const available = chartTypes.find((t) => t.type === type)
-                if (!available) {
-                  const reason = unavailableReason(type, spec, registry)
-                  return (
-                    <button
-                      key={type}
-                      type="button"
-                      className="chart-type"
-                      disabled
-                      style={{ opacity: 0.55, cursor: 'not-allowed' }}
-                    >
-                      <strong>{CHART_LABELS[type]}</strong>
-                      <span>{reason}</span>
-                    </button>
-                  )
-                }
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    className="chart-type"
-                    aria-pressed={activeType === type}
-                    onClick={() => updateSpec({ type })}
-                  >
-                    <strong>{available.label}</strong>
-                    <span>{available.hint}</span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
         {binEditors.map((variableKey) => {
           const def = registry.byKey.get(variableKey)
           if (!def) return null
