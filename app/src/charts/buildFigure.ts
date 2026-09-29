@@ -106,6 +106,17 @@ function errorBar(values: (number | null)[], theme: ChartTheme) {
   }
 }
 
+/**
+ * Whisker ends for a box: the most extreme values within 1.5 × IQR of the quartiles, Tukey's
+ * rule and the one Plotly applies to raw data. Computed here, from the summary table's own
+ * quartiles, so the whiskers follow the same numbers as the box.
+ */
+export function tukeyFences(values: number[], q1: number, q3: number): { lower: number; upper: number } {
+  const reach = 1.5 * (q3 - q1)
+  const inside = values.filter((v) => v >= q1 - reach && v <= q3 + reach)
+  return { lower: Math.min(...inside), upper: Math.max(...inside) }
+}
+
 /** Y-axis label for a measure, including its unit. */
 function measureLabel(def: VariableDef | undefined): string {
   return def ? axisTitle(def) : ''
@@ -323,15 +334,33 @@ function buildBarOrBox(
             '<extra></extra>',
         })
       } else {
-        // A box plot needs the individual values, so each x group contributes its own set.
+        /*
+         * Each box is drawn from the summary table's own median and quartiles rather than left
+         * for Plotly to compute. Plotly's quartile methods all differ from the table's (R's
+         * default, as Excel's QUARTILE.INC and numpy use), so the drawn box disagreed with the
+         * numbers printed beneath it. The group's values still go in, as an inner array, so the
+         * individual points are drawn beside the box.
+         */
+        let legendShown = false
         for (const cell of cells) {
+          const { q1, median, q3, values } = cell.stats
+          // A group with no values has no box to draw.
+          if (q1 === null || median === null || q3 === null) continue
+          const fences = tukeyFences(values, q1, q3)
+          const showlegend = panelIndex === 0 && seriesGroups.length > 1 && !legendShown
+          legendShown = true
           data.push({
             type: 'box',
             name: seriesGroup.label || (def?.label ?? measureKey),
             legendgroup: seriesGroup.label,
-            showlegend: panelIndex === 0 && seriesGroups.length > 1 && cell === cells[0],
-            x: cell.stats.values.map(() => cell.group.label),
-            y: cell.stats.values,
+            showlegend,
+            x: [cell.group.label],
+            q1: [q1],
+            median: [median],
+            q3: [q3],
+            lowerfence: [fences.lower],
+            upperfence: [fences.upper],
+            y: [values],
             marker: { color: colour, size: 6, opacity: 0.75 },
             line: { color: colour, width: 1.5 },
             fillcolor: 'rgba(0,0,0,0)',

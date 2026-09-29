@@ -1,13 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { aggregate } from '../../analysis/aggregate'
 import { buildTrialRows } from '../../analysis/rows'
 import { joinMetadata } from '../../parse/joinMetadata'
 import { parseRatInfo } from '../../parse/parseRatInfo'
 import { parseSession } from '../../parse/parseSession'
 import { FIXTURE_DIR, FIXTURE_PAIRS, readFixture } from '../../parse/__tests__/fixtures'
 import { buildRegistry } from '../../variables/registry'
-import { buildFigure } from '../buildFigure'
+import { buildFigure, tukeyFences } from '../buildFigure'
 import { defaultSpec, type ChartType } from '../spec'
 import { PRINT_THEME } from '../theme'
 
@@ -50,5 +51,34 @@ describe('figure layout', () => {
     const figure = buildFigure(rows, { ...defaultSpec(), type: 'bar', measureKeys: ['percentCorrect'], xKey: 'genotype' }, registry, PRINT_THEME)
     expect(figure.layout.paper_bgcolor).toBe('#ffffff')
     expect(figure.layout.plot_bgcolor).toBe('#ffffff')
+  })
+})
+
+describe('box plots', () => {
+  it('draw each box from the summary table\'s own median and quartiles', async () => {
+    // Plotly's quartile methods all differ from the table's, so a box left to Plotly
+    // disagreed with the numbers printed beneath it. Many values per group, so they would.
+    const { registry, rows } = await setup()
+    const spec = { ...defaultSpec(), type: 'box' as const, measureKeys: ['rewardLatency'], xKey: 'genotype', unit: 'trial' as const }
+    const figure = buildFigure(rows, spec, registry, PRINT_THEME)
+    const table = aggregate(rows, 'rewardLatency', ['genotype'], 'trial', registry)
+
+    const boxes = figure.data as { x: string[]; q1: number[]; median: number[]; q3: number[]; y: number[][] }[]
+    expect(boxes).toHaveLength(table.length)
+    for (const cell of table) {
+      const box = boxes.find((b) => b.x[0] === cell.group.label)!
+      expect(box.q1[0]).toBe(cell.stats.q1)
+      expect(box.median[0]).toBe(cell.stats.median)
+      expect(box.q3[0]).toBe(cell.stats.q3)
+      // The individual values still go in, so the points are drawn beside the box.
+      expect(box.y[0]).toHaveLength(cell.stats.n)
+    }
+  })
+
+  it('end the whiskers at the furthest values within 1.5 × IQR of the box', () => {
+    // Q1 3, Q3 7: the whiskers may reach 6 beyond the box, so 30 is left as an outlier.
+    expect(tukeyFences([1, 2, 3, 4, 5, 6, 7, 8, 30], 3, 7)).toEqual({ lower: 1, upper: 8 })
+    // With nothing outside that reach, the whiskers are the minimum and maximum.
+    expect(tukeyFences([50], 50, 50)).toEqual({ lower: 50, upper: 50 })
   })
 })
