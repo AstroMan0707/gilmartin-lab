@@ -104,7 +104,8 @@ None of these block you. They exist so a surprise in a figure has an explanation
 
 To add files later, drop them in and press Load again: the dataset is rebuilt from every file in
 the list, and files not yet loaded are marked *new*. Removing a file from the list and pressing
-Load takes it out.
+Load takes it out. The chart you had set up in the playground is kept, as long as the new data
+still has every variable it uses.
 
 ### 2. Visualisation playground
 

@@ -201,18 +201,19 @@ export interface PresetCheck {
  */
 export function checkPreset(preset: AnalysisPreset, registry: Registry | null): PresetCheck {
   if (!registry) return { missing: [], ok: true }
-  const needed = [
-    ...preset.spec.measureKeys,
-    preset.spec.xKey,
-    preset.spec.seriesKey,
-  ].filter((k): k is string => typeof k === 'string' && k !== '')
+  const missing = missingVariables(preset.spec, registry)
+  return { missing, ok: missing.length === 0 }
+}
 
-  const missing = needed
+/** Variable keys a chart spec plots or groups by that the registry does not provide. */
+export function missingVariables(spec: ChartSpec, registry: Registry): string[] {
+  const needed = [...spec.measureKeys, spec.xKey, spec.seriesKey].filter(
+    (k): k is string => typeof k === 'string' && k !== '',
+  )
+  return needed
     .map((k) => k.replace(/__bin$/, ''))
     .filter((k, i, all) => all.indexOf(k) === i)
     .filter((k) => !registry.byKey.has(k))
-
-  return { missing, ok: missing.length === 0 }
 }
 
 /** Human-readable summary of what a preset will plot, for the saved list. */

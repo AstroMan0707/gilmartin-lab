@@ -8,6 +8,7 @@ import { loadFiles, mergeFiles, type LoadInput, type LoadProgress } from '../loa
 import {
   deletePreset as removePreset,
   listPresets,
+  missingVariables,
   savePreset as writePreset,
   type AnalysisPreset,
 } from '../presets'
@@ -133,15 +134,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       const dataset = emptyValues ? { ...loaded, warnings: [...loaded.warnings, emptyValues] } : loaded
       rowCache = null
       const pending = get().pendingPreset
+      // Loading again after adding or removing files keeps the chart already built, as long as
+      // everything it plots still exists in the new data. A first load, or one that loses a
+      // variable the chart uses, starts from the defaults.
+      const current = get().dataset ? get().spec : null
+      const keepSpec = current !== null && missingVariables(current, registry).length === 0
       set({
         dataset,
         registry,
         loadedFrom: files,
         loading: false,
         progress: null,
-        // A fresh load invalidates any previous selection, since the variables may differ —
-        // unless a shared preset is waiting, which is the whole point of opening such a link.
-        spec: pending ? pending.spec : defaultSpec(),
+        // A shared preset waiting to be applied wins, which is the whole point of opening
+        // such a link.
+        spec: pending ? pending.spec : keepSpec ? current : defaultSpec(),
         includeCorrectionTrials: pending
           ? pending.includeCorrectionTrials
           : get().includeCorrectionTrials,

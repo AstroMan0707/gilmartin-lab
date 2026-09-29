@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { defaultSpec } from '../../charts/spec'
 import { mergeFiles } from '../../loadFiles'
 import { FIXTURE_DIR, FIXTURE_PAIRS } from '../../parse/__tests__/fixtures'
 import { useAppStore } from '../useAppStore'
@@ -70,6 +71,43 @@ describe('loading more files after a load', () => {
     // The Load tab marks xml2 as new by comparing against this.
     expect(store().loadedFrom?.xmlFiles).toEqual([xml1])
     expect(store().files.xmlFiles).toEqual([xml1, xml2])
+  })
+
+  it('keeps the chart already built when files are added', async () => {
+    store().addFiles([xml1, ratInfo])
+    await store().load()
+    store().updateSpec({ type: 'bar', measureKeys: ['percentCorrect'], xKey: 'genotype', title: 'Mine' })
+    const built = store().spec
+
+    // Loading used to reset the playground every time, so adding a session meant rebuilding
+    // the figure from scratch.
+    store().addFiles([xml2])
+    await store().load()
+    expect(store().spec).toEqual(built)
+  })
+
+  it('starts from the defaults when the chart uses a variable the new data lacks', async () => {
+    store().addFiles([xml1, ratInfo])
+    await store().load()
+    store().updateSpec({ type: 'bar', measureKeys: ['percentCorrect', 'nonesuch'] })
+
+    store().addFiles([xml2])
+    await store().load()
+    expect(store().spec).toEqual(defaultSpec())
+  })
+
+  it('still applies a shared preset waiting for data, over the chart already built', async () => {
+    store().addFiles([xml1, ratInfo])
+    await store().load()
+    store().updateSpec({ type: 'box', measureKeys: ['rewardLatency'], xKey: 'sex' })
+    store().saveCurrentAsPreset('shared')
+    const shared = store().presets.find((p) => p.name === 'shared')!
+    store().updateSpec({ type: 'bar', measureKeys: ['percentCorrect'], xKey: 'genotype' })
+
+    store().setPendingPreset(shared)
+    store().addFiles([xml2])
+    await store().load()
+    expect(store().spec).toEqual(shared.spec)
   })
 
   it('forgets the file list on Start over', async () => {
