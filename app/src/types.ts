@@ -62,6 +62,10 @@ export interface TrialRow {
   isCorrectionTrial: boolean
   /** Trial end timestamp, seconds from session start (`Trial Analysis - Condition`). */
   endSec: number
+  /**
+   * 1 if the rat chose correctly on this attempt, else 0. Unlike ABET's `No. Correct`,
+   * which is 0 on every correction attempt, this also scores correction attempts.
+   */
   correct: number
   /**
    * All trial-level values keyed by raw marker name. Index-aligned Evaluation/Count

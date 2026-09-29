@@ -151,6 +151,25 @@ describe('correction trials', () => {
     expect(ours).toBeCloseTo(percentCorrect as number, 2)
   })
 
+  it.each(FIXTURE_PAIRS)('scores every attempt by the response actually made in $xml', ({ xml }) => {
+    const session = parseSession(xml, readFixture(xml))
+    // A correct-image touch is the ground truth for "correct" on any attempt; ABET's
+    // No. Correct only agrees with it on first attempts.
+    for (const t of session.trials) {
+      const touchedCorrect =
+        t.values['Trial Analysis - Correct Image Response Latency_Duration'] !== null
+      expect(t.correct).toBe(touchedCorrect ? 1 : 0)
+    }
+  })
+
+  it('counts the correction attempt that finally succeeds as correct', () => {
+    const session = parseSession('example-input_1.xml', readFixture('example-input_1.xml'))
+    const trial2 = session.trials.filter((t) => t.trialNo === 2)
+    // Wrong three times, then right. ABET's No. Correct reads 0 on all four attempts.
+    expect(trial2.map((t) => t.correct)).toEqual([0, 0, 0, 1])
+    expect(trial2.map((t) => t.values['Trial Analysis - No. Correct'])).toEqual([0, 0, 0, 0])
+  })
+
   it('numbers repeat attempts in order', () => {
     const session = parseSession('example-input_1.xml', readFixture('example-input_1.xml'))
     const trial2 = session.trials.filter((t) => t.trialNo === 2)

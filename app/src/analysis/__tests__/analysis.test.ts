@@ -146,6 +146,27 @@ describe('row building', () => {
     expect(counts.every((c) => c > 1)).toBe(true)
   })
 
+  it('scores correct correction trials as correct when they are included', async () => {
+    const dataset = await loadDataset()
+    const registry = buildRegistry(dataset)
+    const rows = buildSessionRows(dataset, registry, { includeCorrectionTrials: true })
+
+    // First-attempt corrects (51, 59, 7) plus the correction attempts the rat got right
+    // (16, 13, 7). Reading ABET's No. Correct, which is 0 on every correction attempt,
+    // gave 51/99, 59/86 and 7/31 instead.
+    expect(rows.map((r) => r.values.correctTrials)).toEqual([67, 72, 14])
+    expect(rows.map((r) => r.values.percentCorrect as number)).toEqual([
+      (67 / 99) * 100,
+      (72 / 86) * 100,
+      (14 / 31) * 100,
+    ])
+
+    // Trial rows must agree with session rows under the same setting.
+    const trialRows = buildTrialRows(dataset, registry, { includeCorrectionTrials: true })
+    const correctOnTrialRows = trialRows.reduce((n, r) => n + (r.values.correctTrials as number), 0)
+    expect(correctOnTrialRows).toBe(67 + 72 + 14)
+  })
+
   it('keeps counting correction trials when they are excluded from analysis', async () => {
     const dataset = await loadDataset()
     const registry = buildRegistry(dataset)
@@ -510,9 +531,10 @@ describe('touch counters', () => {
 
     expect(aggregate(rows, 'percentCorrect', [], 'subject', registry)[0].stats.total).toBeNull()
     expect(aggregate(rows, 'rewardLatency', [], 'subject', registry)[0].stats.total).toBeNull()
-    // Counts do report one.
+    // Counts do report one. Correction trials are included, so the correction attempts the
+    // rats got right (16 + 13 + 7) count alongside the first-attempt corrects.
     expect(aggregate(rows, 'correctTrials', [], 'subject', registry)[0].stats.total).toBe(
-      51 + 59 + 7,
+      51 + 59 + 7 + 16 + 13 + 7,
     )
   })
 })

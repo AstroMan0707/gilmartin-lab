@@ -58,6 +58,7 @@ function trialDataSheet(dataset: Dataset, opts: WorkbookOptions) {
   const extraColumns = [
     'Attempt No.',
     'Is Correction Trial',
+    'Correct',
     'Genotype',
     'Set',
     'Age at Test (days)',
@@ -88,6 +89,9 @@ function trialDataSheet(dataset: Dataset, opts: WorkbookOptions) {
       ...abetRow.map(cell),
       numberCell(trial?.attemptNo ?? null),
       textCell(trial ? (trial.isCorrectionTrial ? 'Yes' : 'No') : null),
+      // ABET's own `No. Correct` column above is 0 on every correction attempt; this one
+      // scores correction attempts too, and is what Percent Correct is computed from.
+      numberCell(trial?.correct ?? null),
       textCell(session.genotype),
       numberCell(session.set),
       numberCell(session.ageDays),
@@ -251,6 +255,15 @@ function readMeSheet(dataset: Dataset, opts: WorkbookOptions) {
   )
   para(
     'So the latency columns here will not match an ABET CSV of the same session. Every other column will.',
+  )
+  blank()
+
+  rows.push([{ value: 'About the Correct column', type: String, ...HEADER }, null])
+  para(
+    "ABET's No. Correct column scores first attempts only: it is 0 on every correction trial, even one the rat got right.",
+  )
+  para(
+    'The Correct column scores every attempt, using whether the correct image was touched. It matches No. Correct on every first attempt, and it is what Percent Correct is calculated from.',
   )
   blank()
 
