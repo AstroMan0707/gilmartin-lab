@@ -18,6 +18,7 @@ import {
   baseLayout,
   exceedsColourCapacity,
   FONT_FAMILY,
+  PANEL_GAP,
   type ChartTheme,
 } from './theme'
 
@@ -589,7 +590,7 @@ function panelLayout(
   }
 
   const n = panels.length
-  const gap = 0.1
+  const gap = PANEL_GAP
   const panelHeight = n === 1 ? 1 : (1 - gap * (n - 1)) / n
 
   panels.forEach((measureKey, i) => {

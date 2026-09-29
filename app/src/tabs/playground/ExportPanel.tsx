@@ -5,6 +5,9 @@ import { exportFigure } from '../../export/figureExport'
 import {
   DPI_CHOICES,
   downloadBlob,
+  exportHeightIn,
+  MIN_PANEL_PLOT_HEIGHT_IN,
+  panelPlotHeightIn,
   pixelDimensions,
   plotlyScaleFor,
   plottedValuesToCsv,
@@ -14,11 +17,14 @@ import { useAppStore } from '../../store/useAppStore'
 
 export function ExportPanel({
   buildPrintFigure,
+  panels,
   plottedValues,
   suggestedName,
 }: {
   /** The current figure in the print theme, or null when there is nothing to draw. */
   buildPrintFigure: (() => Figure) | null
+  /** Stacked panels in the figure, one per measure; sizes the automatic height. */
+  panels: number
   plottedValues: { columns: string[]; rows: (string | number | null)[][] }
   suggestedName: string
 }) {
@@ -26,7 +32,9 @@ export function ExportPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const dims = pixelDimensions(exportOptions)
+  const dims = pixelDimensions(exportOptions, panels)
+  const heightIn = exportHeightIn(exportOptions, panels)
+  const panelIn = panelPlotHeightIn(heightIn, panels)
   const name = safeFileName(exportOptions.fileName || suggestedName)
 
   const doExport = async () => {
@@ -82,13 +90,40 @@ export function ExportPanel({
               min={1}
               max={20}
               step={0.25}
-              value={exportOptions.heightIn}
+              value={Math.round(heightIn * 100) / 100}
               onChange={(e) =>
-                updateExportOptions({ heightIn: Math.max(1, Number(e.target.value) || 1) })
+                updateExportOptions({
+                  heightIn: Math.max(1, Number(e.target.value) || 1),
+                  heightAuto: false,
+                })
               }
             />
           </label>
         </div>
+
+        {exportOptions.heightAuto ? (
+          panels > 1 && (
+            <p className="hint" style={{ marginTop: 0 }}>
+              Height set for {panels} panels, so each keeps a readable plot area. Type a height to
+              choose your own.
+            </p>
+          )
+        ) : (
+          <button
+            className="btn btn-quiet"
+            onClick={() => updateExportOptions({ heightAuto: true })}
+          >
+            Size the height to the panels again
+          </button>
+        )}
+
+        {panelIn < MIN_PANEL_PLOT_HEIGHT_IN && (
+          <Notice tone="warning">
+            At {Math.round(heightIn * 100) / 100} in tall, {panels === 1 ? 'the plot' : `each of the ${panels} panels`}{' '}
+            will be about {panelIn.toFixed(1)} in high, too short to read its axis easily.{' '}
+            {panels > 1 ? 'Make it taller, or export fewer measures at once.' : 'Make it taller.'}
+          </Notice>
+        )}
 
         {exportOptions.format === 'png' && (
           <label className="field">

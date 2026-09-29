@@ -18,6 +18,7 @@ import {
 import { getTheme, PRINT_THEME } from '../charts/theme'
 import { Notice } from '../components/Notice'
 import { PlotlyChart } from '../components/PlotlyChart'
+import { panelCount } from '../export/figureOptions'
 import { useAppStore } from '../store/useAppStore'
 import type { Dataset } from '../types'
 import { axisTitle, type Registry } from '../variables/registry'
@@ -341,6 +342,7 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
         {activeType !== 'summary' && (
           <ExportPanel
             buildPrintFigure={buildPrintFigure}
+            panels={figure ? panelCount(figure.layout) : 1}
             plottedValues={figure?.plottedValues ?? { columns: [], rows: [] }}
             suggestedName={labels.title || 'figure'}
           />

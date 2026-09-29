@@ -1,6 +1,12 @@
 import Plotly from 'plotly.js-dist-min'
 import type { Figure } from '../charts/buildFigure'
-import { CSS_PPI, plotlyScaleFor, type FigureExportOptions } from './figureOptions'
+import {
+  CSS_PPI,
+  exportHeightIn,
+  panelCount,
+  plotlyScaleFor,
+  type FigureExportOptions,
+} from './figureOptions'
 import { setPngDpi } from './pngDpi'
 
 export * from './figureOptions'
@@ -38,7 +44,7 @@ export async function exportFigure(
   opts: FigureExportOptions,
 ): Promise<Blob> {
   const layoutWidth = Math.round(opts.widthIn * CSS_PPI)
-  const layoutHeight = Math.round(opts.heightIn * CSS_PPI)
+  const layoutHeight = Math.round(exportHeightIn(opts, panelCount(figure.layout)) * CSS_PPI)
   const source = { data: figure.data, layout: figure.layout } as Parameters<typeof Plotly.toImage>[0]
 
   if (opts.format === 'svg') {

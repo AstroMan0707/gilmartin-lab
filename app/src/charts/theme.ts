@@ -125,6 +125,11 @@ export function axisStyle(theme: ChartTheme) {
   }
 }
 
+/** Space round the plot area, in CSS pixels; the title sits in the top margin. */
+export const FIGURE_MARGIN = { l: 72, r: 28, t: 56, b: 64 }
+/** Gap between stacked panels, as a fraction of the plot area's height. */
+export const PANEL_GAP = 0.1
+
 /** Layout defaults every figure shares. */
 export function baseLayout(theme: ChartTheme) {
   return {
@@ -132,7 +137,7 @@ export function baseLayout(theme: ChartTheme) {
     plot_bgcolor: theme.surface,
     font: { family: FONT_FAMILY, color: theme.textPrimary, size: 13 },
     // Generous padding; the axis band is inside the plot area so labels are never clipped.
-    margin: { l: 72, r: 28, t: 56, b: 64 },
+    margin: FIGURE_MARGIN,
     // Thin marks with visible breathing room between them, rather than borders.
     bargap: 0.28,
     bargroupgap: 0.12,
