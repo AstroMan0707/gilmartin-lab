@@ -82,3 +82,26 @@ describe('box plots', () => {
     expect(tukeyFences([50], 50, 50)).toEqual({ lower: 50, upper: 50 })
   })
 })
+
+describe('line graphs', () => {
+  it('break the line where a series has no data, instead of joining across the gap', async () => {
+    // AD with no trials at separation distance 5. Its line used to list only the distances it
+    // had, so Plotly drew straight from 4 to 6 as if 5 had been measured.
+    const { registry, rows } = await setup()
+    const gappy = rows.filter((r) => !(r.values.genotype === 'AD' && r.values.distance === 5))
+    const spec = { ...defaultSpec(), type: 'line' as const, measureKeys: ['percentCorrect'], xKey: 'distance', seriesKey: 'genotype' }
+    const figure = buildFigure(gappy, spec, registry, PRINT_THEME)
+
+    const lines = figure.data as { name: string; x: string[]; y: (number | null)[]; connectgaps: boolean }[]
+    const ad = lines.find((l) => l.name === 'AD')!
+    const wt = lines.find((l) => l.name === 'WT')!
+    // Both lines run over the same, full axis.
+    expect(ad.x).toEqual(wt.x)
+    const at = (line: typeof ad, level: string) => line.y[line.x.indexOf(level)]
+    expect(at(ad, '5')).toBeNull()
+    expect(at(ad, '4')).not.toBeNull()
+    expect(at(ad, '6')).not.toBeNull()
+    expect(at(wt, '5')).not.toBeNull()
+    expect(ad.connectgaps).toBe(false)
+  })
+})

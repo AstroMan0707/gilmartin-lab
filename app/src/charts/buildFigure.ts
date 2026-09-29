@@ -448,15 +448,22 @@ function buildLine(
       const colour = colours.get(seriesGroup.label) ?? theme.series[0]
       const name = seriesGroup.label || (def?.label ?? measureKey)
 
+      // Every line runs over the whole x-axis, with null where this series has no data. Listing
+      // only the levels the series has made Plotly join, say, session 1 straight to session 3,
+      // since it never saw session 2 was missing; a null is what `connectgaps: false` breaks on.
+      const byLevel = new Map(cells.map((c) => [c.group.label, c.stats]))
+      const means = xLevels.map((level) => byLevel.get(level)?.mean ?? null)
+      const sems = xLevels.map((level) => byLevel.get(level)?.sem ?? null)
+
       data.push({
         type: 'scatter',
         mode: 'lines+markers',
         name,
         legendgroup: seriesGroup.label,
         showlegend: panelIndex === 0 && seriesGroups.length > 1,
-        x: cells.map((c) => c.group.label),
-        y: cells.map((c) => c.stats.mean),
-        error_y: spec.showErrorBars ? errorBar(cells.map((c) => c.stats.sem), theme) : undefined,
+        x: xLevels,
+        y: means,
+        error_y: spec.showErrorBars ? errorBar(sems, theme) : undefined,
         line: { color: colour, width: 2 },
         marker: {
           color: colour,
@@ -464,8 +471,8 @@ function buildLine(
           // A ring of surface colour where markers overlap, instead of a border.
           line: { color: theme.surface, width: 2 },
         },
-        // Gaps stay gaps: a missing session should not be bridged by a straight line that
-        // implies data we do not have.
+        // Gaps stay gaps: a missing session is not bridged by a straight line implying data we
+        // do not have.
         connectgaps: false,
         xaxis: `x${axisSuffix}`,
         yaxis: `y${axisSuffix}`,
