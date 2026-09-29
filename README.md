@@ -102,6 +102,10 @@ came through, which groups and conditions were found, and any of the following:
 
 None of these block you. They exist so a surprise in a figure has an explanation.
 
+To add files later, drop them in and press Load again: the dataset is rebuilt from every file in
+the list, and files not yet loaded are marked *new*. Removing a file from the list and pressing
+Load takes it out.
+
 ### 2. Visualisation playground
 
 Click a **measure** on the left to activate it. Click more than one to get a panel each. Then

@@ -4,7 +4,7 @@ import { buildSessionRows, buildTrialRows, type AnalysisRow } from '../analysis/
 import { defaultSpec, type ChartSpec } from '../charts/spec'
 import type { ThemeMode } from '../charts/theme'
 import { defaultExportOptions, type FigureExportOptions } from '../export/figureOptions'
-import { loadFiles, type LoadInput, type LoadProgress } from '../loadFiles'
+import { loadFiles, mergeFiles, type LoadInput, type LoadProgress } from '../loadFiles'
 import {
   deletePreset as removePreset,
   listPresets,
@@ -24,6 +24,14 @@ interface AppState {
   loading: boolean
   progress: LoadProgress | null
   loadError: string | null
+  /**
+   * Every file chosen on the Load tab, loaded or not. Held here rather than in the tab so it
+   * survives switching tabs: each load builds the dataset from this whole list, so adding
+   * files after a load loads them alongside the others instead of replacing them.
+   */
+  files: LoadInput
+  /** The list the current dataset was built from, to tell loaded files from new ones. */
+  loadedFrom: LoadInput | null
 
   // --- Settings that change what the numbers mean --------------------------------------
   /**
@@ -48,7 +56,12 @@ interface AppState {
   pendingPreset: AnalysisPreset | null
 
   // --- Actions -------------------------------------------------------------------------
-  load(input: LoadInput): Promise<void>
+  /** Adds picked files to the list; returns any that are neither .xml nor .xlsx. */
+  addFiles(files: File[]): File[]
+  removeXmlFile(index: number): void
+  removeRatInfoFile(): void
+  /** Builds the dataset from every file in the list. */
+  load(): Promise<void>
   clear(): void
   setTab(tab: TabId): void
   setTheme(theme: ThemeMode): void
@@ -85,6 +98,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: false,
   progress: null,
   loadError: null,
+  files: { xmlFiles: [], ratInfoFile: null },
+  loadedFrom: null,
   includeCorrectionTrials: false,
   tab: 'load',
   theme: 'light',
@@ -93,10 +108,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   presets: listPresets(),
   pendingPreset: null,
 
-  async load(input) {
+  addFiles(incoming) {
+    const { files, ignored } = mergeFiles(get().files, incoming)
+    set({ files })
+    return ignored
+  },
+
+  removeXmlFile(index) {
+    const { files } = get()
+    set({ files: { ...files, xmlFiles: files.xmlFiles.filter((_, i) => i !== index) } })
+  },
+
+  removeRatInfoFile() {
+    set({ files: { ...get().files, ratInfoFile: null } })
+  },
+
+  async load() {
+    const files = get().files
     set({ loading: true, loadError: null, progress: null })
     try {
-      const loaded = await loadFiles(input, (progress) => set({ progress }))
+      const loaded = await loadFiles(files, (progress) => set({ progress }))
       const registry = buildRegistry(loaded)
       const emptyValues = emptyValueWarning(loaded, registry)
       const dataset = emptyValues ? { ...loaded, warnings: [...loaded.warnings, emptyValues] } : loaded
@@ -105,6 +136,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         dataset,
         registry,
+        loadedFrom: files,
         loading: false,
         progress: null,
         // A fresh load invalidates any previous selection, since the variables may differ —
@@ -130,6 +162,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       dataset: null,
       registry: null,
+      files: { xmlFiles: [], ratInfoFile: null },
+      loadedFrom: null,
       loadError: null,
       progress: null,
       spec: defaultSpec(),
