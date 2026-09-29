@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { emptyValueWarning } from '../analysis/emptyValues'
 import { buildSessionRows, buildTrialRows, type AnalysisRow } from '../analysis/rows'
 import { defaultSpec, type ChartSpec } from '../charts/spec'
 import type { ThemeMode } from '../charts/theme'
@@ -95,12 +96,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   async load(input) {
     set({ loading: true, loadError: null, progress: null })
     try {
-      const dataset = await loadFiles(input, (progress) => set({ progress }))
+      const loaded = await loadFiles(input, (progress) => set({ progress }))
+      const registry = buildRegistry(loaded)
+      const emptyValues = emptyValueWarning(loaded, registry)
+      const dataset = emptyValues ? { ...loaded, warnings: [...loaded.warnings, emptyValues] } : loaded
       rowCache = null
       const pending = get().pendingPreset
       set({
         dataset,
-        registry: buildRegistry(dataset),
+        registry,
         loading: false,
         progress: null,
         // A fresh load invalidates any previous selection, since the variables may differ —

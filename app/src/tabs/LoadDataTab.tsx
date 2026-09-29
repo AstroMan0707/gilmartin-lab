@@ -274,18 +274,18 @@ function ValidationPanel() {
       <div className="divider" />
 
       <h3 style={{ marginBottom: '0.5rem' }}>Checks</h3>
-      {dataset.warnings.length === 0 ? (
+      {/* The empty-value count is a summary, not a problem, so it does not cancel the all-clear. */}
+      {dataset.warnings.every((w) => w.kind === 'empty-values') && (
         <Notice tone="good">
           Every rat matched the Rat Info file, every latency matched a trial, and no duplicate
           sessions were found.
         </Notice>
-      ) : (
-        dataset.warnings.map((warning, i) => (
-          <Notice key={i} tone={toneFor(warning)}>
-            {warning.message}
-          </Notice>
-        ))
       )}
+      {dataset.warnings.map((warning, i) => (
+        <Notice key={i} tone={toneFor(warning)}>
+          {warning.message}
+        </Notice>
+      ))}
 
       <div className="divider" />
 

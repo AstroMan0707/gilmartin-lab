@@ -131,6 +131,7 @@ export type WarningKind =
   | 'missing-test-day'
   | 'unknown-schedule'
   | 'parse-failed'
+  | 'empty-values'
 
 export interface DatasetWarning {
   kind: WarningKind

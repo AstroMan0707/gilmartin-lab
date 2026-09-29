@@ -9,6 +9,7 @@ import type { Dataset } from '../../types'
 import { buildRegistry } from '../../variables/registry'
 import { aggregate, collapseToUnit, describe as describeStats, groupBy } from '../aggregate'
 import { applyBins, binLabelOrder, binnedKey, computeBins, defaultBinSpec } from '../binning'
+import { emptyValueWarning } from '../emptyValues'
 import { buildSessionRows, buildTrialRows } from '../rows'
 
 /**
@@ -226,6 +227,44 @@ describe('descriptive statistics', () => {
     expect(stats.n).toBe(1)
     expect(stats.sd).toBeNull()
     expect(stats.sem).toBeNull()
+  })
+})
+
+describe('empty-value report', () => {
+  /** "Label (count)" pairs and the stated total, read back out of the message. */
+  function parse(message: string) {
+    const total = Number(/^(\d+) empty value/.exec(message)?.[1])
+    const columns = Object.fromEntries(
+      [...message.matchAll(/([A-Z][\w ]*?) \((\d+)\)/g)].map((m) => [m[1], Number(m[2])]),
+    )
+    return { total, columns }
+  }
+
+  it('counts the empty cells in each column of the trial data', async () => {
+    const dataset = await loadDataset()
+    const warning = emptyValueWarning(dataset, buildRegistry(dataset))
+    expect(warning?.kind).toBe('empty-values')
+
+    // 216 attempts, 153 of them correct and rewarded: the reward and correct-response
+    // latencies are empty on the 63 errors, the incorrect-response latency on the 153.
+    const { total, columns } = parse(warning!.message)
+    expect(columns).toEqual({
+      'Reward Collection Latency': 216 - 153,
+      'Correct Response Latency': 216 - 153,
+      'Incorrect Response Latency': 153,
+    })
+    expect(total).toBe(63 + 63 + 153)
+    expect(warning!.message).toContain('over 216 trial attempts')
+  })
+
+  it('flags metadata a rat is missing, not only latencies', async () => {
+    // LZ041's session relabelled to a rat Rat Info has never heard of: 86 attempts with no
+    // genotype and no set.
+    const dataset = await loadDataset(['LZ039', 'ZZ999', 'LZ122'])
+    const { total, columns } = parse(emptyValueWarning(dataset, buildRegistry(dataset))!.message)
+    expect(columns.Genotype).toBe(86)
+    expect(columns.Set).toBe(86)
+    expect(total).toBe(Object.values(columns).reduce((a, b) => a + b, 0))
   })
 })
 
