@@ -82,6 +82,7 @@ describe('DPI arithmetic', () => {
       format: 'png',
       widthIn: 6,
       heightIn: 4,
+      heightAuto: false,
       dpi: 600,
       fileName: 'f',
     })
@@ -97,7 +98,7 @@ describe('DPI arithmetic', () => {
     expect(plotlyScaleFor(300)).toBe(3.125)
 
     // The layout size times the scale must equal the requested pixel dimensions.
-    const opts = { format: 'png' as const, widthIn: 6.5, heightIn: 4.5, dpi: 600, fileName: 'f' }
+    const opts = { format: 'png' as const, widthIn: 6.5, heightIn: 4.5, heightAuto: false, dpi: 600, fileName: 'f' }
     const layoutWidth = Math.round(opts.widthIn * CSS_PPI)
     expect(Math.round(layoutWidth * plotlyScaleFor(opts.dpi))).toBe(
       pixelDimensions(opts).width,

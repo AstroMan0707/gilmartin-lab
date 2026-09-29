@@ -1,6 +1,16 @@
 import Plotly from 'plotly.js-dist-min'
 import type { Figure } from '../charts/buildFigure'
-import { CSS_PPI, plotlyScaleFor, type FigureExportOptions } from './figureOptions'
+import {
+  couldNotDrawMessage,
+  CSS_PPI,
+  exportHeightIn,
+  fitsCanvas,
+  panelCount,
+  pixelDimensions,
+  plotlyScaleFor,
+  tooLargeMessage,
+  type FigureExportOptions,
+} from './figureOptions'
 import { setPngDpi } from './pngDpi'
 
 export * from './figureOptions'
@@ -37,8 +47,9 @@ export async function exportFigure(
   figure: Pick<Figure, 'data' | 'layout'>,
   opts: FigureExportOptions,
 ): Promise<Blob> {
+  const panels = panelCount(figure.layout)
   const layoutWidth = Math.round(opts.widthIn * CSS_PPI)
-  const layoutHeight = Math.round(opts.heightIn * CSS_PPI)
+  const layoutHeight = Math.round(exportHeightIn(opts, panels) * CSS_PPI)
   const source = { data: figure.data, layout: figure.layout } as Parameters<typeof Plotly.toImage>[0]
 
   if (opts.format === 'svg') {
@@ -52,12 +63,26 @@ export async function exportFigure(
     return new Blob([svgText], { type: 'image/svg+xml' })
   }
 
-  const dataUrl = await Plotly.toImage(source, {
-    format: 'png',
-    width: layoutWidth,
-    height: layoutHeight,
-    scale: plotlyScaleFor(opts.dpi),
-  })
+  // Checked first, because a canvas the browser cannot allocate does not fail loudly: it comes
+  // back empty, and used to surface as "that file is not a PNG".
+  const dims = pixelDimensions(opts, panels)
+  if (!fitsCanvas(dims)) throw new Error(tooLargeMessage(opts, panels))
+
+  let dataUrl: string
+  try {
+    dataUrl = await Plotly.toImage(source, {
+      format: 'png',
+      width: layoutWidth,
+      height: layoutHeight,
+      scale: plotlyScaleFor(opts.dpi),
+    })
+  } catch {
+    throw new Error(couldNotDrawMessage(dims))
+  }
+  // A canvas over this browser's own limit yields "data:," rather than an error.
+  if (!dataUrl.startsWith('data:image/png;base64,') || dataUrl.length < 100) {
+    throw new Error(couldNotDrawMessage(dims))
+  }
 
   return new Blob([setPngDpi(dataUrlToArrayBuffer(dataUrl), opts.dpi)], { type: 'image/png' })
 }

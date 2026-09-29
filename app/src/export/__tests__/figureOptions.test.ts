@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { defaultExportOptions, plottedValuesToCsv } from '../figureOptions'
+import {
+  autoHeightIn,
+  clampFigureInches,
+  couldNotDrawMessage,
+  defaultExportOptions,
+  fitsCanvas,
+  largestFittingDpi,
+  tooLargeMessage,
+  exportHeightIn,
+  MIN_PANEL_PLOT_HEIGHT_IN,
+  panelCount,
+  panelPlotHeightIn,
+  pixelDimensions,
+  plottedValuesToCsv,
+} from '../figureOptions'
 
 async function csvText(columns: string[], rows: (string | number | null)[][]) {
   // Read as bytes so the byte-order mark is visible; `text()` would strip it.
@@ -34,3 +48,75 @@ describe('export options', () => {
     expect(defaultExportOptions().fileName).toBe('')
   })
 })
+
+describe('export height', () => {
+  it('keeps a single-panel figure at 4.5 in, and adds height for each further panel', () => {
+    expect(autoHeightIn(1)).toBe(4.5)
+    expect(autoHeightIn(2)).toBe(6.75)
+    expect(autoHeightIn(3)).toBe(9)
+    // Capped so it still fits a page.
+    expect(autoHeightIn(6)).toBe(10)
+  })
+
+  it('gives every panel a readable plot area up to four panels', () => {
+    // A single 4.5 in height used to leave three panels 0.87 in each.
+    expect(panelPlotHeightIn(4.5, 3)).toBeLessThan(0.9)
+    for (const n of [1, 2, 3, 4]) {
+      expect(panelPlotHeightIn(autoHeightIn(n), n)).toBeGreaterThanOrEqual(MIN_PANEL_PLOT_HEIGHT_IN)
+    }
+  })
+
+  it('uses a typed height exactly, once the user sets one', () => {
+    const auto = defaultExportOptions()
+    const typed = { ...auto, heightIn: 5, heightAuto: false }
+    expect(exportHeightIn(auto, 3)).toBe(9)
+    expect(exportHeightIn(typed, 3)).toBe(5)
+    expect(pixelDimensions(auto, 3)).toEqual({ width: 3900, height: 5400 })
+    expect(pixelDimensions(typed, 3)).toEqual({ width: 3900, height: 3000 })
+  })
+
+  it('counts panels by their y-axes', () => {
+    expect(panelCount({ xaxis: {}, yaxis: {} })).toBe(1)
+    expect(panelCount({ yaxis: {}, yaxis2: {}, yaxis3: {}, xaxis3: {} })).toBe(3)
+    expect(panelCount({})).toBe(1)
+  })
+})
+
+describe('oversized PNGs', () => {
+  const at = (widthIn: number, heightIn: number, dpi: number) => ({
+    ...defaultExportOptions(), widthIn, heightIn, heightAuto: false, dpi,
+  })
+
+  it('knows what a browser can draw', () => {
+    // 36,000 px wide renders in Chrome; 24,000 px square is 576 million pixels, which does not.
+    expect(fitsCanvas({ width: 36_000, height: 6_000 })).toBe(true)
+    expect(fitsCanvas({ width: 24_000, height: 24_000 })).toBe(false)
+    expect(fitsCanvas({ width: 70_000, height: 100 })).toBe(false)
+  })
+
+  it('names a resolution that would fit, instead of calling the file "not a PNG"', () => {
+    const opts = at(20, 20, 1200)
+    expect(largestFittingDpi(opts, 1)).toBe(600)
+    const message = tooLargeMessage(opts, 1)
+    expect(message).toContain('This PNG would be 24,000 × 24,000 pixels')
+    expect(message).toContain('At 600 DPI it would be 12,000 × 12,000 pixels')
+    expect(message).toContain('SVG')
+  })
+
+  it('suggests the lower limit iPhones and iPads need', () => {
+    // The default 1200 DPI figure is 42 million pixels; 600 DPI is 10.5 million, under 16.7.
+    expect(largestFittingDpi(at(6.5, 4.5, 1200), 1, 16_777_216)).toBe(600)
+  })
+
+  it('explains a render that failed, with the size it was asked for', () => {
+    expect(couldNotDrawMessage({ width: 36_000, height: 6_000 })).toMatch(/could not draw a PNG this large \(36,000 × 6,000 pixels\)/)
+  })
+
+  it('keeps typed sizes within 1 to 20 inches', () => {
+    expect(clampFigureInches(50)).toBe(20)
+    expect(clampFigureInches(0)).toBe(1)
+    expect(clampFigureInches(Number.NaN)).toBe(1)
+    expect(clampFigureInches(6.5)).toBe(6.5)
+  })
+})
+
