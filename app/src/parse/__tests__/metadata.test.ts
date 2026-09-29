@@ -149,7 +149,10 @@ describe('derived session summary', () => {
       session.endSummary['End Summary - Percentage Correct'] as number,
       2,
     )
-    expect(summary.nCorrectionTrials).toBe(0)
+    // Counted from the whole session, so it survives the filter above; with the default
+    // setting this column used to read 0 for every session.
+    expect(summary.nCorrectionTrials).toBe(session.trials.length - firstAttempts.length)
+    expect(summary.nCorrectionTrials).toBeGreaterThan(0)
 
     // Accuracy per distance must agree with the End Summary counters, which are correct
     // counts per distance over first attempts.

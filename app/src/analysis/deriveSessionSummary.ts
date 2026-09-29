@@ -5,6 +5,10 @@ export interface SessionSummary {
   nTrials: number
   /** Distinct `Trial No.` values, i.e. trials the rat reached. */
   nTrialsUnique: number
+  /**
+   * Correction attempts in the whole session, whatever the filter. Counted from the
+   * filtered trials it would always be 0 with correction trials excluded, the default.
+   */
   nCorrectionTrials: number
   percentCorrect: number | null
   /** Percent correct at each separation distance present in the session. */
@@ -87,7 +91,7 @@ export function deriveSessionSummary(session: Session, trials: TrialRow[]): Sess
   return {
     nTrials: trials.length,
     nTrialsUnique: new Set(trials.map((t) => t.trialNo)).size,
-    nCorrectionTrials: trials.filter((t) => t.isCorrectionTrial).length,
+    nCorrectionTrials: session.trials.filter((t) => t.isCorrectionTrial).length,
     percentCorrect,
     percentCorrectByDistance,
     meanLatency,

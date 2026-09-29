@@ -138,6 +138,15 @@ describe('workbook export', () => {
     )
   })
 
+  it('counts correction trials in Session Summary whatever the setting', async () => {
+    for (const include of [false, true]) {
+      const rows = sheetByName(await roundTrip(include), 'Session Summary')
+      const col = rows[0].map(String).indexOf('Correction Trials')
+      // The playground's Correction Trials measure reports the same 31, 14 and 17.
+      expect(rows.slice(1).map((r) => r[col])).toEqual([31, 14, 17])
+    }
+  })
+
   it('carries genotype, age and delay onto every session row', async () => {
     const rows = sheetByName(await roundTrip(false), 'Session Summary')
     const header = rows[0].map(String)
