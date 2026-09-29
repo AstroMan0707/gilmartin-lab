@@ -64,6 +64,12 @@ export function getTheme(mode: ThemeMode): ChartTheme {
   return mode === 'dark' ? DARK : LIGHT
 }
 
+/**
+ * The theme exported figures are drawn in, whatever the screen shows: light, on pure white
+ * rather than the off-white the app uses for its cards, because a figure lands on a white page.
+ */
+export const PRINT_THEME: ChartTheme = { ...LIGHT, surface: '#ffffff', page: '#ffffff' }
+
 export const MAX_COLOURED_SERIES = 8
 
 export const FONT_FAMILY = 'system-ui, -apple-system, "Segoe UI", sans-serif'

@@ -25,7 +25,8 @@ export interface FigureExportOptions {
 export const DPI_CHOICES = [300, 600, 1200] as const
 
 export function defaultExportOptions(): FigureExportOptions {
-  return { format: 'png', widthIn: 6.5, heightIn: 4.5, dpi: 600, fileName: 'figure' }
+  // An empty name means "use the chart title", so exports are not all called figure.png.
+  return { format: 'png', widthIn: 6.5, heightIn: 4.5, dpi: 600, fileName: '' }
 }
 
 /** Pixel dimensions a raster export will have. Shown in the UI before exporting. */
@@ -41,11 +42,18 @@ export function plotlyScaleFor(dpi: number): number {
   return dpi / CSS_PPI
 }
 
-/** Escapes a value for CSV, quoting only when necessary. */
+/**
+ * Escapes a value for CSV, quoting only when necessary.
+ *
+ * Text starting with = + - or @ is prefixed with an apostrophe, which Excel hides, so a group
+ * label taken from someone's spreadsheet cannot run as a formula when the CSV is opened.
+ * Numbers are left alone: a negative number is data, not a formula.
+ */
 function csvCell(value: string | number | null): string {
   if (value === null) return ''
-  const s = String(value)
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  let s = String(value)
+  if (typeof value === 'string' && /^[=+\-@]/.test(s)) s = `'${s}`
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 /**
@@ -60,7 +68,9 @@ export function plottedValuesToCsv(table: {
 }): Blob {
   const lines = [table.columns.map(csvCell).join(',')]
   for (const row of table.rows) lines.push(row.map(csvCell).join(','))
-  return new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+  // The byte-order mark tells Excel the file is UTF-8; without it, labels such as "≥ 12 s"
+  // open as "â‰¥ 12 s" on Windows.
+  return new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' })
 }
 
 /**

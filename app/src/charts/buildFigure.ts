@@ -90,10 +90,15 @@ export function levelsOf(
   return groupBy(rows, [groupingKey], registry, levelOrder).map((g) => g.label)
 }
 
+/**
+ * Mean ± SEM error bars. A group of one has no SEM, so it gets NaN, which Plotly skips.
+ * Mapping it to 0 drew a flat cap that read as certainty, contradicting the notice that the
+ * group has no error bar; null does the same, because Plotly converts it with `+null`.
+ */
 function errorBar(values: (number | null)[], theme: ChartTheme) {
   return {
     type: 'data' as const,
-    array: values.map((v) => (v === null ? 0 : v)),
+    array: values.map((v) => (v === null ? Number.NaN : v)),
     visible: true,
     color: theme.textSecondary,
     thickness: 1.5,
@@ -511,6 +516,9 @@ function panelLayout(
       // grouping so panels stay aligned.
       title: { text: i === n - 1 ? labels.xLabel : '' },
       showticklabels: i === n - 1,
+      // A vertical line at each bar or box reads as an error bar. Lines keep them, where they
+      // help read a value across.
+      showgrid: spec.type === 'line',
       type: 'category',
       categoryorder: 'array',
       categoryarray: xLevels,

@@ -135,6 +135,16 @@ export function joinMetadata(
 
   // --- Aggregate the per-session findings into warnings -------------------------------
   for (const [animalId, files] of unmatched) {
+    if (animalId === '') {
+      // A file with no Animal ID cannot be looked up at all; name the files, since there is
+      // no ID to name.
+      warnings.push({
+        kind: 'unmatched-animal',
+        message: `${files.length} session file(s) record no Animal ID, so they have no genotype, set or age, and each counts as a separate rat: ${files.join(', ')}. Their data is still included.`,
+        files,
+      })
+      continue
+    }
     warnings.push({
       kind: 'unmatched-animal',
       message: `"${animalId}" is not in the Rat Info file, so it has no genotype, set or age. Its data is still included.`,

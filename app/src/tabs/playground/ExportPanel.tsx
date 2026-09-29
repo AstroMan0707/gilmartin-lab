@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { Figure } from '../../charts/buildFigure'
 import { Notice } from '../../components/Notice'
 import { exportFigure } from '../../export/figureExport'
 import {
@@ -12,11 +13,12 @@ import {
 import { useAppStore } from '../../store/useAppStore'
 
 export function ExportPanel({
-  graphDiv,
+  buildPrintFigure,
   plottedValues,
   suggestedName,
 }: {
-  graphDiv: HTMLDivElement | null
+  /** The current figure in the print theme, or null when there is nothing to draw. */
+  buildPrintFigure: (() => Figure) | null
   plottedValues: { columns: string[]; rows: (string | number | null)[][] }
   suggestedName: string
 }) {
@@ -28,11 +30,11 @@ export function ExportPanel({
   const name = safeFileName(exportOptions.fileName || suggestedName)
 
   const doExport = async () => {
-    if (!graphDiv) return
+    if (!buildPrintFigure) return
     setBusy(true)
     setError(null)
     try {
-      const blob = await exportFigure(graphDiv, { ...exportOptions, fileName: name })
+      const blob = await exportFigure(buildPrintFigure(), { ...exportOptions, fileName: name })
       downloadBlob(blob, `${name}.${exportOptions.format}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -127,7 +129,7 @@ export function ExportPanel({
           </p>
         )}
 
-        <button className="btn btn-primary" onClick={doExport} disabled={busy || !graphDiv}>
+        <button className="btn btn-primary" onClick={doExport} disabled={busy || !buildPrintFigure}>
           {busy ? 'Rendering…' : `Download ${exportOptions.format.toUpperCase()}`}
         </button>
 
@@ -142,7 +144,7 @@ export function ExportPanel({
         </button>
 
         {error && <Notice tone="error">{error}</Notice>}
-        {!graphDiv && (
+        {!buildPrintFigure && (
           <p className="hint">Choose a chart type that draws a figure to enable image export.</p>
         )}
       </div>

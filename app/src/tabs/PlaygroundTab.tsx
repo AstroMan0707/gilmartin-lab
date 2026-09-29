@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
   AGGREGATION_DESCRIPTIONS,
   AGGREGATION_LABELS,
@@ -15,7 +15,7 @@ import {
   unavailableReason,
   type ChartType,
 } from '../charts/spec'
-import { getTheme } from '../charts/theme'
+import { getTheme, PRINT_THEME } from '../charts/theme'
 import { Notice } from '../components/Notice'
 import { PlotlyChart } from '../components/PlotlyChart'
 import { useAppStore } from '../store/useAppStore'
@@ -63,8 +63,6 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
     sessionRows,
   } = useAppStore()
 
-  const [graphDiv, setGraphDiv] = useState<HTMLDivElement | null>(null)
-  const onGraphReady = useCallback((div: HTMLDivElement | null) => setGraphDiv(div), [])
 
   /**
    * Trial-level rows carry session metadata too, so they can serve any selection. Session
@@ -94,6 +92,14 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
   }, [rows, spec, activeType, registry, theme])
 
   const config = useMemo(() => plotlyConfig(), [])
+
+  // Exports are rebuilt in the print theme on demand, so dark mode costs nothing until the
+  // user downloads. Null when nothing is drawn, which is what disables the download button;
+  // it used to hang on to the last graph even after the chart was cleared.
+  const buildPrintFigure = useMemo(() => {
+    if (!figure || figure.data.length === 0) return null
+    return () => buildFigure(rows, { ...spec, type: activeType }, registry, PRINT_THEME)
+  }, [figure, rows, spec, activeType, registry])
 
   const primaryDef = registry.byKey.get(spec.measureKeys[0] ?? '')
   const labels = resolveLabels(
@@ -166,7 +172,6 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
                   data={figure.data}
                   layout={figure.layout}
                   config={config}
-                  onGraphReady={onGraphReady}
                 />
               )}
 
@@ -187,9 +192,8 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
         )}
       </div>
 
+      {/* In the order the work is done: pick a chart, adjust it, export it; presets last. */}
       <div className="rail">
-        <PresetPanel registry={registry} />
-
         <div className="card" data-testid="chart-types">
           <div className="card-header">
             <h3>Chart type</h3>
@@ -336,11 +340,13 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
 
         {activeType !== 'summary' && (
           <ExportPanel
-            graphDiv={graphDiv}
+            buildPrintFigure={buildPrintFigure}
             plottedValues={figure?.plottedValues ?? { columns: [], rows: [] }}
             suggestedName={labels.title || 'figure'}
           />
         )}
+
+        <PresetPanel registry={registry} />
       </div>
     </div>
   )

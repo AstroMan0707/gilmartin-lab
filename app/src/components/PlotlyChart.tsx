@@ -5,8 +5,6 @@ interface PlotlyChartProps {
   data: Record<string, unknown>[]
   layout: Record<string, unknown>
   config: Record<string, unknown>
-  /** Receives the graph div so the export panel can render from the live figure. */
-  onGraphReady?: (div: HTMLDivElement | null) => void
   className?: string
 }
 
@@ -17,7 +15,7 @@ interface PlotlyChartProps {
  * since 2023 and declares a React 18 peer dependency. `Plotly.react` already does the
  * diffing a React binding would add, so the whole integration is an effect and a ref.
  */
-export function PlotlyChart({ data, layout, config, onGraphReady, className }: PlotlyChartProps) {
+export function PlotlyChart({ data, layout, config, className }: PlotlyChartProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -25,8 +23,7 @@ export function PlotlyChart({ data, layout, config, onGraphReady, className }: P
     if (!div) return
     // `react` updates an existing plot in place, preserving zoom and pan across re-renders.
     void Plotly.react(div, data as never, layout as never, config as never)
-    onGraphReady?.(div)
-  }, [data, layout, config, onGraphReady])
+  }, [data, layout, config])
 
   useEffect(() => {
     const div = ref.current

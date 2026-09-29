@@ -106,7 +106,7 @@ export function availableChartTypes(
       type: 'histogram',
       label: CHART_LABELS.histogram,
       hint: hasGrouping
-        ? 'The shape of the distribution, one panel per group.'
+        ? 'The shape of the distribution, with the groups overlaid.'
         : 'The shape of the distribution.',
     })
   }

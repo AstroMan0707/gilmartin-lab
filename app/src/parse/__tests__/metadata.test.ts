@@ -175,6 +175,18 @@ describe('joining sessions to subjects', () => {
     })
   })
 
+  it('names the files that record no Animal ID, rather than quoting an empty ID', async () => {
+    const { subjects } = await parseRatInfo(ratInfoBlob())
+    const noId = parseSession('no-id.xml', readFixture('example-input_1.xml'))
+    ;(noId as { animalId: string }).animalId = ''
+    ;(noId as { animalIdRaw: string }).animalIdRaw = ''
+    const { warnings } = joinMetadata([noId], subjects)
+    const warning = warnings.find((w) => w.kind === 'unmatched-animal')
+    expect(warning?.message).toContain('record no Animal ID')
+    expect(warning?.message).toContain('no-id.xml')
+    expect(warning?.message).not.toContain('""')
+  })
+
   it('flags the same run loaded twice', async () => {
     const { subjects } = await parseRatInfo(ratInfoBlob())
     const a = parseSession('copy-a.xml', readFixture('example-input_1.xml'))
