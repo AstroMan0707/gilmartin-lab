@@ -48,8 +48,24 @@ export function detectTrialStructure(series: Map<string, MarkerSeries>): TrialSt
     }
   }
 
+  // In a one-trial session every block emits each marker once, so series length cannot
+  // tell the trial block from the session blocks. Fall back to the block that numbers
+  // its trials; without this the lone trial was read as session-level summary values.
+  if (!trialBlock) {
+    for (const block of maxByBlock.keys()) {
+      if (series.has(`${block} - Trial No.`)) {
+        trialBlock = block
+        break
+      }
+    }
+  }
+
   const sessionBlocks = [...maxByBlock.keys()].filter((b) => b !== trialBlock)
-  return { trialBlock, sessionBlocks, trialCount: trialBlock ? best : 0 }
+  return {
+    trialBlock,
+    sessionBlocks,
+    trialCount: trialBlock ? (maxByBlock.get(trialBlock) ?? 0) : 0,
+  }
 }
 
 /**
