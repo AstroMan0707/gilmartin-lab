@@ -104,8 +104,10 @@ export function SummaryTable({
         group, so it answers &quot;how many altogether&quot; while the mean answers &quot;how many
         each&quot;; it is shown only for counts, since a total of percentages or latencies has no
         meaning. SD and SEM are blank where a group holds a single observation — one value has no
-        spread. <strong>Missing</strong> counts observations with no value for that measure, such
-        as trials where no reward was collected; they are left out rather than counted as zero.
+        spread. <strong>Missing</strong> counts data points of the same kind as n that have no
+        value for that measure, such as trials where no reward was collected, or a rat with no
+        rewarded trials at all. They are left out rather than counted as zero, so n plus Missing is
+        every rat, session or trial in the group.
       </p>
     </div>
   )

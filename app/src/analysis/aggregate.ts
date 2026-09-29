@@ -27,7 +27,10 @@ export const AGGREGATION_DESCRIPTIONS: Record<AggregationUnit, string> = {
 
 export interface Stats {
   n: number
-  /** Rows in the group where the variable had no value, and so were not counted. */
+  /**
+   * Data points in the group with no value, and so not in n: trials, sessions or rats,
+   * whichever the unit is. n + missing is every trial, session or rat in the group.
+   */
   missing: number
   mean: number | null
   sd: number | null
@@ -256,7 +259,8 @@ export function groupBy(
  *
  * Combining skips missing values, so a session's reward latency is the mean over the
  * trials where the rat actually collected a reward, and a session with no value at all
- * does not count towards the rat.
+ * does not count towards the rat. A session or rat with no value at all is returned as
+ * null rather than dropped, so it is reported as missing instead of silently shrinking n.
  */
 export function collapseToUnit(
   rows: AnalysisRow[],
@@ -269,28 +273,31 @@ export function collapseToUnit(
   const combineValues = (vals: number[]) =>
     combine === 'sum' ? vals.reduce((a, b) => a + b, 0) : ssMean(vals)
 
+  // Every session in the rows is registered, valued or not, so an empty one survives as null.
   const bySession = new Map<string, { subject: string; values: number[] }>()
   for (const row of rows) {
-    const v = row.values[measureKey]
-    if (typeof v !== 'number' || !Number.isFinite(v)) continue
     const id = String(row.values.__sessionIndex ?? row.sessionIndex)
-    const session = bySession.get(id)
-    if (session) session.values.push(v)
-    else bySession.set(id, { subject: String(row.values.__subjectKey), values: [v] })
+    let session = bySession.get(id)
+    if (!session) {
+      session = { subject: String(row.values.__subjectKey), values: [] }
+      bySession.set(id, session)
+    }
+    const v = row.values[measureKey]
+    if (typeof v === 'number' && Number.isFinite(v)) session.values.push(v)
   }
   const sessions = [...bySession.values()].map((s) => ({
     subject: s.subject,
-    value: combineValues(s.values),
+    value: s.values.length > 0 ? combineValues(s.values) : null,
   }))
   if (unit === 'session') return sessions.map((s) => s.value)
 
   const bySubject = new Map<string, number[]>()
   for (const s of sessions) {
-    const list = bySubject.get(s.subject)
-    if (list) list.push(s.value)
-    else bySubject.set(s.subject, [s.value])
+    const list = bySubject.get(s.subject) ?? []
+    if (s.value !== null) list.push(s.value)
+    bySubject.set(s.subject, list)
   }
-  return [...bySubject.values()].map(combineValues)
+  return [...bySubject.values()].map((vals) => (vals.length > 0 ? combineValues(vals) : null))
 }
 
 export interface AggregatedCell {

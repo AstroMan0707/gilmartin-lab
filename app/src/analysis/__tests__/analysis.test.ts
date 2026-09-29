@@ -229,6 +229,47 @@ describe('descriptive statistics', () => {
   })
 })
 
+describe('missing data points', () => {
+  /*
+   * Reward latencies for three rats:
+   *   A: session 0 [2, —, 4], session 1 [—, 6]
+   *   B: session 2 [—, —]         never collected a reward
+   *   C: session 3 [3], session 4 [—]
+   */
+  const trial = (sessionIndex: number, subject: string, rewardLatency: number | null) => ({
+    sessionIndex,
+    values: { __sessionIndex: sessionIndex, __subjectKey: subject, rewardLatency },
+  })
+  const rows = [
+    trial(0, 'A', 2), trial(0, 'A', null), trial(0, 'A', 4),
+    trial(1, 'A', null), trial(1, 'A', 6),
+    trial(2, 'B', null), trial(2, 'B', null),
+    trial(3, 'C', 3),
+    trial(4, 'C', null),
+  ]
+
+  it.each([
+    // unit, n, missing — n + missing is always every data point of that kind.
+    ['trial', 4, 5],
+    ['session', 3, 2],
+    ['subject', 2, 1],
+  ] as const)('counts %s-level data points with no value as missing', async (unit, n, missing) => {
+    // Missing used to read 0 for sessions and rats, and rat B vanished from n uncounted.
+    const registry = buildRegistry(await loadDataset())
+    const [cell] = aggregate(rows, 'rewardLatency', [], unit, registry)
+    expect(cell.stats.n).toBe(n)
+    expect(cell.stats.missing).toBe(missing)
+  })
+
+  it('leaves the missing rat out of the mean rather than counting it as zero', async () => {
+    const registry = buildRegistry(await loadDataset())
+    const [cell] = aggregate(rows, 'rewardLatency', [], 'subject', registry)
+    // A is the mean of its session means (3 and 6); C's empty session does not count.
+    expect(cell.stats.values.sort()).toEqual([3, 4.5])
+    expect(cell.stats.mean).toBe(3.75)
+  })
+})
+
 describe('aggregation unit', () => {
   it('makes n the number of rats, not the number of trials', async () => {
     const dataset = await loadDataset()

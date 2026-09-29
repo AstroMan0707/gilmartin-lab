@@ -151,7 +151,9 @@ These are the places where a reasonable-looking number can mislead.
   rarely what you want for a group comparison.
 - **Missing is not zero.** A trial where no reward was collected has no reward latency. Such
   trials are left out of averages rather than counted as zero seconds, and the count is reported
-  in the *Missing* column.
+  in the *Missing* column. Missing counts the same kind of data point as n, so with *Each rat* it
+  is the rats that have no value at all; n plus Missing is always every rat, session or trial in
+  the group.
 - **n, Total and Mean answer different questions.** *n* is the number of data points — subjects,
   sessions or trials, whichever you chose. *Total* is how many altogether. *Mean* is how many
   each. Total appears only for counts, because summing percentages or latencies has no meaning.
