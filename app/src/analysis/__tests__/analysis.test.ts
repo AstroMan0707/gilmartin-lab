@@ -198,6 +198,17 @@ describe('descriptive statistics', () => {
     expect(stats.mean).toBe(3)
   })
 
+  it('uses the sample SD, with an n − 1 denominator', () => {
+    // Worked by hand: mean 2.5, squared deviations sum to 5, so SD = √(5/3) and
+    // SEM = SD/√4. The population form, √(5/4) = 1.118, understates both.
+    const stats = describeStats([1, 2, 3, 4])
+    expect(stats.sd).toBeCloseTo(Math.sqrt(5 / 3), 12)
+    expect(stats.sem).toBeCloseTo(Math.sqrt(5 / 3) / 2, 12)
+
+    // n = 2: SD is |a − b| / √2.
+    expect(describeStats([10, 20]).sd).toBeCloseTo(10 / Math.SQRT2, 12)
+  })
+
   it('reports no error bar for a single observation', () => {
     // An SEM of 0 would draw a zero-length error bar, implying certainty from one rat.
     const stats = describeStats([5])
