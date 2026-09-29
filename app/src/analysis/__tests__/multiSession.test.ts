@@ -171,3 +171,56 @@ describe('n with several sessions per rat', () => {
     expect(nByGroup(dataset, 'genotype')).toBe('AD:1 WT:5 —:2')
   })
 })
+
+describe('a rat\'s value across several sessions', () => {
+  /*
+   * One rat, LZ084, run on the three fixture sessions. They differ in length — 68, 72 and 14
+   * first attempts at 75%, 81.9% and 50% correct — so averaging the sessions (69.0%) and
+   * pooling the trials (117 / 154 = 76.0%) give visibly different answers.
+   */
+  const opts = { includeCorrectionTrials: false }
+  function perRat(measureKey: string) {
+    const dataset = cohort(rat('LZ084', ['female', 'female', 'female']))
+    const registry = buildRegistry(dataset)
+    const value = (rows: ReturnType<typeof buildSessionRows>) => {
+      const [cell] = aggregate(rows, measureKey, [], 'subject', registry)
+      expect(cell.stats.n).toBe(1)
+      return cell.stats.mean as number
+    }
+    return {
+      dataset,
+      fromSessionRows: value(buildSessionRows(dataset, registry, opts)),
+      fromTrialRows: value(buildTrialRows(dataset, registry, opts)),
+    }
+  }
+
+  it('gives Percent Correct as the mean of the sessions, whichever rows it comes from', () => {
+    // The playground uses trial rows once any trial-level variable is selected. They used to
+    // pool the trials, so adding an unrelated variable changed a rat's accuracy.
+    const { fromSessionRows, fromTrialRows } = perRat('percentCorrect')
+    // Exact fractions; ABET's own End Summary rounds 59/72 to 81.944.
+    const meanOfSessions = ((51 / 68 + 59 / 72 + 7 / 14) / 3) * 100
+
+    expect(fromSessionRows).toBeCloseTo(meanOfSessions, 9)
+    expect(fromTrialRows).toBeCloseTo(meanOfSessions, 9)
+    expect(fromTrialRows).not.toBeCloseTo((117 / 154) * 100, 1)
+  })
+
+  it('gives a latency as the mean of the session means', () => {
+    const { dataset, fromTrialRows } = perRat('rewardLatency')
+    const sessionMeans = dataset.sessions.map((s) => {
+      const present = s.trials
+        .filter((t) => !t.isCorrectionTrial)
+        .map((t) => t.values['Trial Analysis - Reward Collection Latency_Duration'])
+        .filter((v): v is number => v !== null)
+      return present.reduce((a, b) => a + b, 0) / present.length
+    })
+    expect(fromTrialRows).toBeCloseTo(sessionMeans.reduce((a, b) => a + b, 0) / 3, 9)
+  })
+
+  it('still totals counts across every session', () => {
+    const { fromSessionRows, fromTrialRows } = perRat('correctTrials')
+    expect(fromSessionRows).toBe(51 + 59 + 7)
+    expect(fromTrialRows).toBe(51 + 59 + 7)
+  })
+})

@@ -145,7 +145,8 @@ These are the places where a reasonable-looking number can mislead.
   `No. Correct` is 0 on every repeat, even a correct one, so the exported Trial Data sheet adds a
   *Correct* column that scores every attempt.
 - **"Each point is" changes what n means.** It defaults to *Each rat*, averaging within each
-  subject before groups are compared. Switching to *Each trial* makes n the number of trials,
+  subject before groups are compared: first within each session, then across the rat's sessions,
+  so every session counts equally however many trials it had. Switching to *Each trial* makes n the number of trials,
   which inflates it by orders of magnitude and will make almost any difference look large. That is
   rarely what you want for a group comparison.
 - **Missing is not zero.** A trial where no reward was collected has no reward latency. Such

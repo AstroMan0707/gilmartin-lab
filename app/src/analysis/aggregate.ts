@@ -22,7 +22,7 @@ export const AGGREGATION_LABELS: Record<AggregationUnit, string> = {
 export const AGGREGATION_DESCRIPTIONS: Record<AggregationUnit, string> = {
   trial: 'Every trial is its own data point. n is the number of trials.',
   session: 'Trials are averaged within each session. n is the number of sessions.',
-  subject: 'Everything is averaged within each rat. n is the number of rats — the usual choice for comparing groups.',
+  subject: 'Trials are averaged within each session, then sessions within each rat, so every session counts equally. n is the number of rats — the usual choice for comparing groups.',
 }
 
 export interface Stats {
@@ -247,9 +247,16 @@ export function groupBy(
  * Reduces rows to one value per unit of aggregation, so that downstream statistics treat
  * the right thing as an independent observation.
  *
- * 'trial' leaves rows alone. 'session' and 'subject' average the measure within each
- * session or each rat first. Averaging skips missing values, so a rat's reward latency is
- * the mean over the trials where it actually collected a reward.
+ * 'trial' leaves rows alone. 'session' combines the measure within each session. 'subject'
+ * does that first and then combines each rat's sessions, so every session counts once
+ * however many trials it had. That keeps a rat's value the same whether it comes from
+ * trial rows or session rows: the playground switches to trial rows as soon as any
+ * trial-level variable is selected, and averaging a rat's trials directly used to make
+ * Percent Correct change meaning when an unrelated variable was added.
+ *
+ * Combining skips missing values, so a session's reward latency is the mean over the
+ * trials where the rat actually collected a reward, and a session with no value at all
+ * does not count towards the rat.
  */
 export function collapseToUnit(
   rows: AnalysisRow[],
@@ -259,22 +266,31 @@ export function collapseToUnit(
 ): CellValue[] {
   if (unit === 'trial') return rows.map((r) => r.values[measureKey] ?? null)
 
-  const buckets = new Map<string, number[]>()
+  const combineValues = (vals: number[]) =>
+    combine === 'sum' ? vals.reduce((a, b) => a + b, 0) : ssMean(vals)
+
+  const bySession = new Map<string, { subject: string; values: number[] }>()
   for (const row of rows) {
     const v = row.values[measureKey]
     if (typeof v !== 'number' || !Number.isFinite(v)) continue
-    const id =
-      unit === 'subject'
-        ? String(row.values.__subjectKey)
-        : String(row.values.__sessionIndex ?? row.sessionIndex)
-    const list = buckets.get(id)
-    if (list) list.push(v)
-    else buckets.set(id, [v])
+    const id = String(row.values.__sessionIndex ?? row.sessionIndex)
+    const session = bySession.get(id)
+    if (session) session.values.push(v)
+    else bySession.set(id, { subject: String(row.values.__subjectKey), values: [v] })
   }
+  const sessions = [...bySession.values()].map((s) => ({
+    subject: s.subject,
+    value: combineValues(s.values),
+  }))
+  if (unit === 'session') return sessions.map((s) => s.value)
 
-  return [...buckets.values()].map((vals) =>
-    combine === 'sum' ? vals.reduce((a, b) => a + b, 0) : ssMean(vals),
-  )
+  const bySubject = new Map<string, number[]>()
+  for (const s of sessions) {
+    const list = bySubject.get(s.subject)
+    if (list) list.push(s.value)
+    else bySubject.set(s.subject, [s.value])
+  }
+  return [...bySubject.values()].map(combineValues)
 }
 
 export interface AggregatedCell {
