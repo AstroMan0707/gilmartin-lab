@@ -25,13 +25,18 @@ function metadataValues(session: Session, sessionIndex: number): Record<string, 
     set: session.set,
     delaySec: session.delaySec,
     sessionNumber: session.sessionNumber,
-    animalId: session.animalIdRaw || session.animalId,
+    // The normalised ID, so that "LZ039" and "lz 039" — one rat to the Rat Info join and to
+    // session numbering — are one rat on the chart too. Null when the file records no ID.
+    animalId: session.animalId || null,
     ageDays: session.ageDays,
     testDay: session.testDay ? session.testDay.toISOString().slice(0, 10) : null,
     chamber: session.chamber,
     scheduleName: session.scheduleName,
     __sessionIndex: sessionIndex,
     __fileName: session.fileName,
+    // Identity for "Each rat". A session without an ID is its own subject, matching how
+    // joinMetadata numbers its sessions; it must not merge with every other ID-less file.
+    __subjectKey: session.animalId || `file:${session.fileName}`,
   }
 }
 

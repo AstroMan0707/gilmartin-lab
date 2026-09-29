@@ -11,10 +11,21 @@ import { aggregate, collapseToUnit, describe as describeStats, groupBy } from '.
 import { applyBins, binLabelOrder, binnedKey, computeBins, defaultBinSpec } from '../binning'
 import { buildSessionRows, buildTrialRows } from '../rows'
 
-async function loadDataset(): Promise<Dataset> {
+/**
+ * The three fixture sessions joined to Rat Info. `animalIds`, if given, overwrites each
+ * file's Animal ID before parsing — the fixtures hold one session per rat, so this is how
+ * a test gets two files for the same rat, or files that record no ID.
+ */
+async function loadDataset(animalIds?: string[]): Promise<Dataset> {
   const buf = readFileSync(join(FIXTURE_DIR, 'Rat Info.xlsx'))
   const { subjects } = await parseRatInfo(new Blob([new Uint8Array(buf)]))
-  const parsed = FIXTURE_PAIRS.map((p) => parseSession(p.xml, readFixture(p.xml)))
+  const parsed = FIXTURE_PAIRS.map((p, i) => {
+    let xml = readFixture(p.xml)
+    if (animalIds) {
+      xml = xml.replace(/(<Name>Animal ID<\/Name>\s*<Value>)[^<]*/, `$1${animalIds[i]}`)
+    }
+    return parseSession(p.xml, xml)
+  })
   const { sessions, warnings } = joinMetadata(parsed, subjects)
   return {
     sessions,
@@ -232,6 +243,28 @@ describe('aggregation unit', () => {
     expect(byTrial[0].stats.n).toBeGreaterThan(100)
   })
 
+  it('counts one rat once, however its ID is spelled', async () => {
+    // The Rat Info join and session numbering already treat these as one rat; "Each rat"
+    // used to see two, inflating n.
+    const dataset = await loadDataset(['LZ039', 'lz 039', 'LZ122'])
+    const registry = buildRegistry(dataset)
+    const rows = buildTrialRows(dataset, registry, { includeCorrectionTrials: true })
+
+    expect(aggregate(rows, 'correctImageLatency', [], 'subject', registry)[0].stats.n).toBe(2)
+    expect(groupBy(rows, ['animalId'], registry).map((g) => g.label)).toEqual(['LZ039', 'LZ122'])
+  })
+
+  it('treats each session without an ID as its own rat', async () => {
+    // Two ID-less files are not evidence of one rat. They used to share an empty ID and
+    // collapse into a single data point.
+    const dataset = await loadDataset(['', '', 'LZ122'])
+    const registry = buildRegistry(dataset)
+    const rows = buildSessionRows(dataset, registry, { includeCorrectionTrials: false })
+
+    expect(aggregate(rows, 'percentCorrect', [], 'subject', registry)[0].stats.n).toBe(3)
+    expect(rows.map((r) => r.values.animalId)).toEqual([null, null, 'LZ122'])
+  })
+
   it('averages within a rat before comparing groups', async () => {
     const dataset = await loadDataset()
     const registry = buildRegistry(dataset)
@@ -292,7 +325,7 @@ describe('aggregation unit', () => {
     const registry = buildRegistry(dataset)
     // Two sessions attributed to the same rat, so collapsing has something to do.
     const rows = buildSessionRows(dataset, registry, { includeCorrectionTrials: false }).slice(0, 2)
-    for (const r of rows) r.values.animalId = 'SAME'
+    for (const r of rows) r.values.__subjectKey = 'SAME'
 
     const count = aggregate(rows, 'correctTrials', [], 'subject', registry)[0]
     const rate = aggregate(rows, 'percentCorrect', [], 'subject', registry)[0]
