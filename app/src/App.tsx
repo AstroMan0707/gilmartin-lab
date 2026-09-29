@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { clearPresetHash, presetFromHash } from './presets'
 import { useAppStore, type TabId } from './store/useAppStore'
 import { DataTableTab } from './tabs/DataTableTab'
@@ -15,7 +16,8 @@ const TABS: { id: TabId; label: string; needsData: boolean }[] = [
 ]
 
 export default function App() {
-  const { tab, setTab, theme, setTheme, dataset, applyPreset, setPendingPreset } = useAppStore()
+  const { tab, setTab, theme, setTheme, dataset, applyPreset, setPendingPreset, resetSpec } =
+    useAppStore()
   const followedSystemTheme = useRef(false)
   const readSharedPreset = useRef(false)
 
@@ -93,19 +95,22 @@ export default function App() {
       </header>
 
       <main className="app-main">
-        {tab === 'load' && <LoadDataTab />}
-        {tab === 'playground' && (
-          <Suspense
-            fallback={
-              <div className="card empty-state">
-                <p className="muted">Loading the charting tools…</p>
-              </div>
-            }
-          >
-            <PlaygroundTab />
-          </Suspense>
-        )}
-        {tab === 'table' && <DataTableTab />}
+        {/* Keyed by tab, so moving to another tab clears an error shown on this one. */}
+        <ErrorBoundary key={tab} onReset={resetSpec}>
+          {tab === 'load' && <LoadDataTab />}
+          {tab === 'playground' && (
+            <Suspense
+              fallback={
+                <div className="card empty-state">
+                  <p className="muted">Loading the charting tools…</p>
+                </div>
+              }
+            >
+              <PlaygroundTab />
+            </Suspense>
+          )}
+          {tab === 'table' && <DataTableTab />}
+        </ErrorBoundary>
       </main>
     </div>
   )

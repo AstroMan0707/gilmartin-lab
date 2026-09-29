@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { defaultSpec } from '../../charts/spec'
 import { mergeFiles } from '../../loadFiles'
+import { PRESET_VERSION, type AnalysisPreset } from '../../presets'
 import { FIXTURE_DIR, FIXTURE_PAIRS } from '../../parse/__tests__/fixtures'
 import { useAppStore } from '../useAppStore'
 
@@ -117,5 +118,57 @@ describe('loading more files after a load', () => {
     expect(store().files).toEqual({ xmlFiles: [], ratInfoFile: null })
     expect(store().loadedFrom).toBeNull()
     expect(store().dataset).toBeNull()
+  })
+})
+
+describe('the notice after opening a preset', () => {
+  beforeEach(() => {
+    store().clear()
+    store().setIncludeCorrectionTrials(false)
+  })
+
+  function preset(measureKeys: string[], includeCorrectionTrials: boolean): AnalysisPreset {
+    return {
+      id: 'p',
+      name: 'From a colleague',
+      createdAt: '',
+      spec: { ...defaultSpec(), type: 'bar', measureKeys, xKey: 'genotype' },
+      includeCorrectionTrials,
+      version: PRESET_VERSION,
+    }
+  }
+
+  it('names what a shared link lacks, and says it changed the correction-trial setting', async () => {
+    // A link opened before any data waits for the load. It used to be applied with no
+    // notice at all, so a missing variable or a flipped setting went unexplained.
+    store().setPendingPreset(preset(['percentCorrect', 'nonesuch'], true))
+    store().addFiles([xml1, ratInfo])
+    await store().load()
+    expect(store().appliedPreset).toEqual({
+      name: 'From a colleague',
+      missing: ['nonesuch'],
+      correctionTrialsNow: true,
+    })
+    expect(store().includeCorrectionTrials).toBe(true)
+  })
+
+  it('gives the same notice for a preset opened once data is loaded', async () => {
+    store().addFiles([xml1, ratInfo])
+    await store().load()
+    store().applyPreset(preset(['percentCorrect'], false))
+    // Nothing missing, and the setting was already "excluded", so nothing to flag.
+    expect(store().appliedPreset).toEqual({
+      name: 'From a colleague',
+      missing: [],
+      correctionTrialsNow: null,
+    })
+  })
+
+  it('clears on Start over', async () => {
+    store().addFiles([xml1, ratInfo])
+    await store().load()
+    store().applyPreset(preset(['percentCorrect'], false))
+    store().clear()
+    expect(store().appliedPreset).toBeNull()
   })
 })

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { computeBins } from '../analysis/binning'
 import { defaultSpec, type ChartSpec } from '../charts/spec'
 import {
   checkPreset,
@@ -184,6 +185,82 @@ describe('sharing by link', () => {
     expect(presetFromHash('#preset=not-valid-base64!!')).toBeNull()
     expect(presetFromHash('#something-else')).toBeNull()
     expect(presetFromHash('')).toBeNull()
+  })
+})
+
+describe('reading a hand-edited link', () => {
+  /** Whatever someone typed into a link, read back the way the app reads a shared one. */
+  function openLink(spec: Record<string, unknown>) {
+    const raw = { id: 'x', name: 'Edited', createdAt: '', version: PRESET_VERSION, includeCorrectionTrials: false, spec }
+    const recovered = presetFromHash(new URL(presetLink(raw as unknown as AnalysisPreset, 'http://h/')).hash)
+    expect(recovered).not.toBeNull()
+    return recovered!.spec
+  }
+
+  it('repairs a bin spec with no edges, which used to throw while drawing', () => {
+    const spec = openLink({ bins: { rewardLatency: { mode: 'custom' } } })
+    expect(spec.bins.rewardLatency).toEqual({
+      variableKey: 'rewardLatency',
+      mode: 'custom',
+      binCount: 4,
+      edges: [],
+    })
+    // The call that used to throw a TypeError during render.
+    expect(() => computeBins(spec.bins.rewardLatency, [])).not.toThrow()
+  })
+
+  it('caps bin counts at what the editor allows, instead of freezing the tab', () => {
+    const spec = openLink({
+      bins: { rewardLatency: { mode: 'equal-count', binCount: 2e6, edges: [] } },
+      histogramBins: 1e9,
+    })
+    expect(spec.bins.rewardLatency.binCount).toBe(12)
+    expect(spec.histogramBins).toBe(100)
+    expect(openLink({ histogramBins: -5 }).histogramBins).toBe(5)
+  })
+
+  it('bins the variable a spec is filed under, never a different one', () => {
+    const spec = openLink({ bins: { rewardLatency: { variableKey: 'correctImageLatency', mode: 'custom', binCount: 3, edges: [6] } } })
+    expect(spec.bins.rewardLatency.variableKey).toBe('rewardLatency')
+  })
+
+  it('drops edges and labels of the wrong type', () => {
+    const spec = openLink({
+      bins: { x: { mode: 'custom', binCount: 3, edges: [6, 'twelve', null, 20], labels: ['fast', 3, null] } },
+    })
+    expect(spec.bins.x.edges).toEqual([6, 20])
+    expect(spec.bins.x.labels).toEqual(['fast', null, null])
+  })
+
+  it('falls back to the defaults for an unknown chart type, unit or mode', () => {
+    const spec = openLink({ type: 'pie', unit: 'bogus', bins: { x: { mode: 'magic', binCount: 3, edges: [] } } })
+    expect(spec.type).toBe(defaultSpec().type)
+    // An unknown unit used to behave as "Each session" and read "one row per undefined".
+    expect(spec.unit).toBe('subject')
+    expect(spec.bins.x.mode).toBe('equal-count')
+  })
+
+  it('reads only true and false as on and off', () => {
+    // "no" used to count as true.
+    const spec = openLink({ showErrorBars: 'no', showValues: 'yes' })
+    expect(spec.showErrorBars).toBe(defaultSpec().showErrorBars)
+    expect(spec.showValues).toBe(defaultSpec().showValues)
+    expect(openLink({ showErrorBars: false }).showErrorBars).toBe(false)
+  })
+
+  it('de-duplicates and caps the measures', () => {
+    const many = Array.from({ length: 500 }, (_, i) => `m${i}`)
+    expect(openLink({ measureKeys: ['a', 'a', 7, '', 'b'] }).measureKeys).toEqual(['a', 'b'])
+    expect(openLink({ measureKeys: many }).measureKeys).toHaveLength(50)
+  })
+
+  it('ignores bins that are not an object of objects', () => {
+    expect(openLink({ bins: [1, 2] }).bins).toEqual({})
+    expect(openLink({ bins: { x: 'custom' } }).bins).toEqual({})
+  })
+
+  it('leaves a well-formed preset exactly as saved', () => {
+    expect(openLink(sampleSpec() as unknown as Record<string, unknown>)).toEqual(sampleSpec())
   })
 })
 

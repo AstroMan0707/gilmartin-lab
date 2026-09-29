@@ -6,6 +6,7 @@ import type { ThemeMode } from '../charts/theme'
 import { defaultExportOptions, type FigureExportOptions } from '../export/figureOptions'
 import { loadFiles, mergeFiles, type LoadInput, type LoadProgress } from '../loadFiles'
 import {
+  checkPreset,
   deletePreset as removePreset,
   listPresets,
   missingVariables,
@@ -16,6 +17,15 @@ import type { Dataset } from '../types'
 import { buildRegistry, type Registry } from '../variables/registry'
 
 export type TabId = 'load' | 'table' | 'playground'
+
+/** What opening a preset did, for the notice shown after it, whichever way it was opened. */
+export interface AppliedPreset {
+  name: string
+  /** Variables it uses that the loaded data lacks. */
+  missing: string[]
+  /** The correction-trial setting it switched to, if it changed it; otherwise null. */
+  correctionTrialsNow: boolean | null
+}
 
 interface AppState {
   // --- Data ---------------------------------------------------------------------------
@@ -55,6 +65,8 @@ interface AppState {
    * once files arrive, instead of being discarded by the fresh-load reset.
    */
   pendingPreset: AnalysisPreset | null
+  /** The preset most recently opened, from the saved list or a shared link. */
+  appliedPreset: AppliedPreset | null
 
   // --- Actions -------------------------------------------------------------------------
   /** Adds picked files to the list; returns any that are neither .xml nor .xlsx. */
@@ -79,6 +91,19 @@ interface AppState {
   trialRows(): AnalysisRow[]
   /** Rows at session level, honouring the correction-trial setting. */
   sessionRows(): AnalysisRow[]
+}
+
+function describeApplied(
+  preset: AnalysisPreset,
+  registry: Registry | null,
+  correctionTrialsBefore: boolean,
+): AppliedPreset {
+  return {
+    name: preset.name,
+    missing: checkPreset(preset, registry).missing,
+    correctionTrialsNow:
+      preset.includeCorrectionTrials === correctionTrialsBefore ? null : preset.includeCorrectionTrials,
+  }
 }
 
 /**
@@ -108,6 +133,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   exportOptions: defaultExportOptions(),
   presets: listPresets(),
   pendingPreset: null,
+  appliedPreset: null,
 
   addFiles(incoming) {
     const { files, ignored } = mergeFiles(get().files, incoming)
@@ -152,6 +178,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? pending.includeCorrectionTrials
           : get().includeCorrectionTrials,
         pendingPreset: null,
+        // A link opened before any data is applied here, so it gets the same notice as one
+        // opened from the saved list: which variables it lacks, and whether it changed the
+        // correction-trial setting.
+        appliedPreset: pending ? describeApplied(pending, registry, get().includeCorrectionTrials) : null,
         tab: 'playground',
       })
     } catch (error) {
@@ -170,6 +200,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       registry: null,
       files: { xmlFiles: [], ratInfoFile: null },
       loadedFrom: null,
+      appliedPreset: null,
       loadError: null,
       progress: null,
       spec: defaultSpec(),
@@ -204,9 +235,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   applyPreset(preset) {
     rowCache = null
+    const { registry, includeCorrectionTrials } = get()
     set({
       spec: preset.spec,
       includeCorrectionTrials: preset.includeCorrectionTrials,
+      appliedPreset: describeApplied(preset, registry, includeCorrectionTrials),
       tab: 'playground',
     })
   },

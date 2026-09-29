@@ -8,6 +8,8 @@ import { buildFigure, plotlyConfig } from '../charts/buildFigure'
 import {
   availableChartTypes,
   CHART_LABELS,
+  HISTOGRAM_BINS_MAX,
+  HISTOGRAM_BINS_MIN,
   measuresLabel,
   resolveLabels,
   unavailableReason,
@@ -281,12 +283,15 @@ function Playground({ dataset, registry }: { dataset: Dataset; registry: Registr
                 Number of bars
                 <input
                   type="number"
-                  min={5}
-                  max={100}
+                  min={HISTOGRAM_BINS_MIN}
+                  max={HISTOGRAM_BINS_MAX}
                   value={spec.histogramBins}
                   onChange={(e) =>
                     updateSpec({
-                      histogramBins: Math.max(5, Math.min(100, Number(e.target.value) || 20)),
+                      histogramBins: Math.max(
+                        HISTOGRAM_BINS_MIN,
+                        Math.min(HISTOGRAM_BINS_MAX, Number(e.target.value) || 20),
+                      ),
                     })
                   }
                 />

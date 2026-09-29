@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Notice } from '../../components/Notice'
 import {
-  checkPreset,
   describePreset,
   presetLink,
   presetsAvailable,
@@ -22,10 +21,10 @@ import type { Registry } from '../../variables/registry'
  * The preset rides in the URL fragment, which browsers never transmit to the server.
  */
 export function PresetPanel({ registry }: { registry: Registry }) {
-  const { presets, spec, applyPreset, saveCurrentAsPreset, removePreset } = useAppStore()
+  const { presets, spec, applyPreset, saveCurrentAsPreset, removePreset, appliedPreset: applied } =
+    useAppStore()
   const [name, setName] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
-  const [applied, setApplied] = useState<{ name: string; missing: string[] } | null>(null)
 
   const available = presetsAvailable()
   const canSave = spec.measureKeys.length > 0
@@ -37,11 +36,7 @@ export function PresetPanel({ registry }: { registry: Registry }) {
     setName('')
   }
 
-  const open = (preset: AnalysisPreset) => {
-    const check = checkPreset(preset, registry)
-    applyPreset(preset)
-    setApplied({ name: preset.name, missing: check.missing })
-  }
+  const open = (preset: AnalysisPreset) => applyPreset(preset)
 
   const copyLink = async (preset: AnalysisPreset) => {
     const link = presetLink(preset)
@@ -99,7 +94,9 @@ export function PresetPanel({ registry }: { registry: Registry }) {
         )}
 
         {applied && (
-          <Notice tone={applied.missing.length > 0 ? 'warning' : 'good'}>
+          <Notice
+            tone={applied.missing.length > 0 || applied.correctionTrialsNow !== null ? 'warning' : 'good'}
+          >
             {applied.missing.length > 0 ? (
               <>
                 Opened <strong>{applied.name}</strong>, but the data you have loaded has no{' '}
@@ -109,6 +106,14 @@ export function PresetPanel({ registry }: { registry: Registry }) {
             ) : (
               <>
                 Opened <strong>{applied.name}</strong>.
+              </>
+            )}
+            {applied.correctionTrialsNow !== null && (
+              <>
+                {' '}
+                It also switched correction trials to{' '}
+                <strong>{applied.correctionTrialsNow ? 'included' : 'excluded'}</strong>, which
+                changes every figure and the Excel export.
               </>
             )}
           </Notice>
